@@ -7,8 +7,5 @@ export default defineConfig({
 		coverage: {
 			provider: 'v8',
 		},
-		alias: {
-			axios: 'axios/dist/node/axios.cjs',
-		},
 	},
 });

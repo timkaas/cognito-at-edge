@@ -1,7 +1,6 @@
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import type { CloudFrontRequest, CloudFrontRequestEvent, CloudFrontResultResponse } from 'aws-lambda';
-import axios from 'axios';
-import { parse, stringify } from 'querystring';
+import { parse } from 'querystring';
 import {
 	CookieAttributes,
 	CookieSettingsOverrides,
@@ -112,6 +111,37 @@ export class Authenticator {
 	private readonly _tokenCache: Map<string, { payload: CognitoIdTokenPayload; expSec: number }>;
 
 	constructor(params: AuthenticatorParams) {
+		if (!params) throw new Error('Expected params');
+		if (typeof params.region !== 'string') throw new Error('Expected params.region to be a string');
+		if (typeof params.userPoolId !== 'string') throw new Error('Expected params.userPoolId to be a string');
+		if (typeof params.userPoolAppId !== 'string') throw new Error('Expected params.userPoolAppId to be a string');
+		if (typeof params.userPoolDomain !== 'string') throw new Error('Expected params.userPoolDomain to be a string');
+		if (params.sameSite && !Object.values(['Strict', 'Lax', 'None']).includes(params.sameSite)) {
+			throw new Error('Expected params.sameSite to be Strict, Lax, or None');
+		}
+		if (params.cookieExpirationDays !== undefined && typeof params.cookieExpirationDays !== 'number') {
+			throw new Error('Expected params.cookieExpirationDays to be a number');
+		}
+		if (params.disableCookieDomain !== undefined && typeof params.disableCookieDomain !== 'boolean') {
+			throw new Error('Expected params.disableCookieDomain to be a boolean');
+		}
+		if (params.cookieDomain !== undefined && typeof params.cookieDomain !== 'string') {
+			throw new Error('Expected params.cookieDomain to be a string');
+		}
+		if (params.httpOnly !== undefined && typeof params.httpOnly !== 'boolean') {
+			throw new Error('Expected params.httpOnly to be a boolean');
+		}
+		if (params.cookiePath !== undefined && typeof params.cookiePath !== 'string') {
+			throw new Error('Expected params.cookiePath to be a string');
+		}
+		if (params.logoutConfiguration?.logoutUri !== undefined) {
+			if (typeof params.logoutConfiguration.logoutUri !== 'string' ||
+				params.logoutConfiguration.logoutUri === '' ||
+				params.logoutConfiguration.logoutUri === '/') {
+				throw new Error('Expected params.logoutConfiguration.logoutUri to be a valid string');
+			}
+		}
+
 		this._region = params.region;
 		this._userPoolId = params.userPoolId;
 		this._userPoolClientId = params.userPoolAppId;
@@ -164,22 +194,24 @@ export class Authenticator {
 		logCtx: Record<string, unknown>,
 	): Promise<T> {
 		const authorization = this._getAuthorization();
-		const request = {
-			url: `https://${this._userPoolDomain}/oauth2/token`,
+		const url = `https://${this._userPoolDomain}/oauth2/token`;
+		const init: RequestInit = {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				...(authorization && { Authorization: `Basic ${authorization}` }),
 			},
-			data: stringify(data),
-		} as const;
-		this._logger.debug({ ...logCtx, request });
+			body: new URLSearchParams(data).toString(),
+		};
+		this._logger.debug({ ...logCtx, url });
 		try {
-			const resp = await axios.request<T>(request);
-			this._logger.debug({ ...logCtx, tokens: resp.data });
-			return resp.data;
+			const resp = await fetch(url, init);
+			if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+			const json = (await resp.json()) as T;
+			this._logger.debug({ ...logCtx, tokens: json });
+			return json;
 		} catch (err) {
-			this._logger.error({ ...logCtx, request });
+			this._logger.error({ ...logCtx, url });
 			throw err;
 		}
 	}
@@ -590,39 +622,38 @@ export class Authenticator {
 
 	async _revokeTokens(tokens: Tokens) {
 		const authorization = this._getAuthorization();
-		const revokeRequest = {
-			url: `https://${this._userPoolDomain}/oauth2/revoke`,
+		const url = `https://${this._userPoolDomain}/oauth2/revoke`;
+		const init: RequestInit = {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded',
 				...(authorization && { Authorization: `Basic ${authorization}` }),
 			},
-			data: stringify({
+			body: new URLSearchParams({
 				client_id: this._userPoolClientId,
-				token: tokens.refreshToken,
-			}),
-		} as const;
+				token: tokens.refreshToken ?? '',
+			}).toString(),
+		};
 		this._logger.debug({
 			msg: 'Revoking refreshToken...',
-			request: revokeRequest,
+			url,
 			refreshToken: tokens.refreshToken,
 		});
-		return axios
-			.request(revokeRequest)
-			.then(() => {
-				this._logger.debug({
-					msg: 'Revoked refreshToken',
-					refreshToken: tokens.refreshToken,
-				});
-			})
-			.catch((err: unknown) => {
-				this._logger.error({
-					msg: 'Unable to revoke refreshToken',
-					request: revokeRequest,
-					err: JSON.stringify(err),
-				});
-				throw err;
+		try {
+			const resp = await fetch(url, init);
+			if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+			this._logger.debug({
+				msg: 'Revoked refreshToken',
+				refreshToken: tokens.refreshToken,
 			});
+		} catch (err) {
+			this._logger.error({
+				msg: 'Unable to revoke refreshToken',
+				url,
+				err: JSON.stringify(err),
+			});
+			throw err;
+		}
 	}
 
 	async _clearCookies(

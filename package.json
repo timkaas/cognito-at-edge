@@ -22,8 +22,7 @@
 		"prepare": "husky"
 	},
 	"dependencies": {
-		"aws-jwt-verify": "^5.1.1",
-		"axios": "^1.15.2"
+		"aws-jwt-verify": "^5.1.1"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",

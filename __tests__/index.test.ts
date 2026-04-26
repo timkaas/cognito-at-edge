@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 import { vi, type MockInstance } from 'vitest';
-import axios from 'axios';
 import {
 	CloudFrontRequest,
 	CloudFrontRequestEvent,
@@ -75,7 +74,7 @@ describe('private functions', () => {
 	});
 
 	test('should fetch token', async () => {
-		vi.spyOn(axios, 'request').mockResolvedValue({ data: tokenData });
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(tokenData) }));
 
 		const res = await authenticator._fetchTokensFromCode(
 			'htt://redirect',
@@ -91,7 +90,7 @@ describe('private functions', () => {
 
 	test('should throw if unable to fetch token', async () => {
 		const unexpectedError = new Error('Unexpected error');
-		vi.spyOn(axios, 'request').mockRejectedValue(unexpectedError);
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(unexpectedError));
 
 		await expect(() =>
 			authenticator._fetchTokensFromCode('htt://redirect', 'AUTH_CODE'),
@@ -102,7 +101,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticator._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -178,7 +177,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithNoCookieDomain._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -251,7 +250,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithHttpOnly._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -325,7 +324,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithSameSite._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -400,7 +399,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithPath._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -478,7 +477,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithPath._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -572,7 +571,7 @@ describe('private functions', () => {
 		const username = 'toto';
 		const domain = 'example.com';
 		const path = '/test';
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithPath._jwtVerifier, 'verify')
 			.mockResolvedValueOnce(createMockCognitoPayload(username));
 
@@ -794,7 +793,7 @@ describe('private functions', () => {
 
 		test('should throw error when calculated Hmac is different than the one stored in the cookie', async () => {
 			const csrfModule = await import('../src/util/csrf');
-			jest
+			vi
 				.spyOn(csrfModule, 'signNonce')
 				.mockReturnValue('nonce-hmac-value-different');
 
@@ -816,15 +815,14 @@ describe('private functions', () => {
 	});
 
 	test('_revokeTokens', async () => {
-		const spyAxiosRequest = jest
-			.spyOn(axios, 'request')
-			.mockResolvedValue({ data: tokenData });
+		const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+		vi.stubGlobal('fetch', mockFetch);
 		await authenticator._revokeTokens({
 			refreshToken: tokenData.refresh_token,
 		});
-		expect(spyAxiosRequest).toHaveBeenCalledWith(
+		expect(mockFetch).toHaveBeenCalledWith(
+			'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/revoke',
 			expect.objectContaining({
-				url: 'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/revoke',
 				method: 'POST',
 			}),
 		);
@@ -832,7 +830,7 @@ describe('private functions', () => {
 
 	describe('_clearCookies', () => {
 		test('should verify tokens and clear cookies', async () => {
-			jest
+			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
@@ -853,7 +851,7 @@ describe('private functions', () => {
 		});
 
 		test('should clear cookies even if tokens cannot be verified', async () => {
-			jest
+			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockRejectedValueOnce(new Error());
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
@@ -876,7 +874,7 @@ describe('private functions', () => {
 		});
 
 		test('should clear cookies and redirect to logoutRedirectUri', async () => {
-			jest
+			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
 			authenticator._logoutConfiguration = {
@@ -896,12 +894,12 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://foobar.com',
+				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Ffoobar.com',
 			);
 		});
 
 		test('should clear cookies and redirect to redirect_uri query param', async () => {
-			jest
+			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
@@ -913,12 +911,12 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://foobar.com',
+				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Ffoobar.com',
 			);
 		});
 
 		test('should clear cookies and redirect to cf domain', async () => {
-			jest
+			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
@@ -928,7 +926,7 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://d111111abcdef8.cloudfront.net',
+				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net',
 			);
 		});
 	});
@@ -1252,13 +1250,13 @@ describe('handle', () => {
 			userPoolDomain: 'my-cognito-domain.auth.us-east-1.amazoncognito.com',
 			parseAuthPath: '/custom/login/path',
 		});
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithCustomRedirect._jwtVerifier, 'verify')
 			.mockRejectedValueOnce(new Error());
-		const spyFetchTokensFromCode = jest
+		const spyFetchTokensFromCode = vi
 			.spyOn(authenticatorWithCustomRedirect, '_fetchTokensFromCode')
 			.mockResolvedValueOnce(tokenData);
-		const spyGetRedirectResponse = jest
+		const spyGetRedirectResponse = vi
 			.spyOn(authenticatorWithCustomRedirect, '_getRedirectResponse')
 			.mockResolvedValueOnce({
 				status: '302',
@@ -1321,7 +1319,7 @@ describe('handle', () => {
 					{
 						key: 'Location',
 						value:
-							'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/authorize?redirect_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net&response_type=code&client_id=123456789qwertyuiop987abcd&state=%2Flol%253F%253Fparam%253D1',
+							'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/authorize?redirect_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net&response_type=code&client_id=123456789qwertyuiop987abcd&state=%2Flol%253F%253Fparam%253D1',
 					},
 				],
 				'cache-control': [
@@ -1349,7 +1347,7 @@ describe('handle', () => {
 			userPoolDomain: 'my-cognito-domain.auth.us-east-1.amazoncognito.com',
 			parseAuthPath: '/custom/login/path',
 		});
-		const spyJwtVerify = jest
+		const spyJwtVerify = vi
 			.spyOn(authenticatorWithCustomRedirect._jwtVerifier, 'verify')
 			.mockRejectedValueOnce(new Error());
 
@@ -1364,7 +1362,7 @@ describe('handle', () => {
 					{
 						key: 'Location',
 						value:
-							'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/authorize?redirect_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net%2Fcustom%2Flogin%2Fpath&response_type=code&client_id=123456789qwertyuiop987abcd&state=%2Flol%253F%253Fparam%253D1',
+							'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/authorize?redirect_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net%2Fcustom%2Flogin%2Fpath&response_type=code&client_id=123456789qwertyuiop987abcd&state=%2Flol%253F%253Fparam%253D1',
 					},
 				],
 				'cache-control': [
@@ -1415,7 +1413,7 @@ describe('handle', () => {
 		expect(url.origin).toStrictEqual(
 			'https://my-cognito-domain.auth.us-east-1.amazoncognito.com',
 		);
-		expect(url.pathname).toStrictEqual('/authorize');
+		expect(url.pathname).toStrictEqual('/oauth2/authorize');
 		expect(url.searchParams.get('redirect_uri')).toStrictEqual(
 			'https://d111111abcdef8.cloudfront.net',
 		);
@@ -1451,7 +1449,7 @@ describe('handle', () => {
 			userPoolDomain: 'my-cognito-domain.auth.us-east-1.amazoncognito.com',
 			parseAuthPath: '/custom/login/path',
 		});
-		jest
+		vi
 			.spyOn(authenticatorWithCustomRedirect._jwtVerifier, 'verify')
 			.mockRejectedValueOnce(new Error());
 		const response = await authenticatorWithCustomRedirect.handle(
@@ -1725,7 +1723,7 @@ describe('handleParseAuth', () => {
 			authenticator._csrfProtection = {
 				nonceSigningSecret: 'foo-bar',
 			};
-			spyValidateCSRFCookies.mockImplementation();
+			spyValidateCSRFCookies.mockImplementation(() => {});
 			spyGetTokensFromCode.mockResolvedValueOnce({
 				idToken: tokenData.id_token,
 				refreshToken: tokenData.refresh_token,
