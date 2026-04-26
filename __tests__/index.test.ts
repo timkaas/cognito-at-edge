@@ -833,6 +833,7 @@ describe('private functions', () => {
 			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
 			const tokens = {
 				idToken: tokenData.id_token,
@@ -854,6 +855,7 @@ describe('private functions', () => {
 			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockRejectedValueOnce(new Error());
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
 			const tokens = {
 				idToken: tokenData.id_token,
@@ -877,6 +879,7 @@ describe('private functions', () => {
 			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 			authenticator._logoutConfiguration = {
 				logoutUri: '/logout',
 				logoutRedirectUri: 'https://foobar.com',
@@ -894,7 +897,7 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Ffoobar.com',
+				'https://foobar.com',
 			);
 		});
 
@@ -902,6 +905,7 @@ describe('private functions', () => {
 			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
 			const request = getCloudfrontRequest();
 			request.Records[0].cf.request.querystring =
@@ -911,7 +915,7 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Ffoobar.com',
+				'https://foobar.com',
 			);
 		});
 
@@ -919,6 +923,7 @@ describe('private functions', () => {
 			vi
 				.spyOn(authenticator._jwtVerifier, 'verify')
 				.mockResolvedValueOnce(createMockCognitoPayload());
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 			authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
 			const request = getCloudfrontRequest();
 			const response = await authenticator._clearCookies(request);
@@ -926,7 +931,7 @@ describe('private functions', () => {
 				expect.objectContaining({ status: '302' }),
 			);
 			expect(response.headers?.['location']?.[0]?.value).toStrictEqual(
-				'https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net',
+				'https://d111111abcdef8.cloudfront.net',
 			);
 		});
 	});

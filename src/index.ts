@@ -728,11 +728,23 @@ export class Authenticator {
 			}
 		}
 
-		const t = encodeURIComponent(redirectURI);
+		// Call logout endpoint server-side (fire and forget)
+		const logoutUrl = `https://${this._userPoolDomain}/logout`;
+		const logoutInit: RequestInit = {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+			},
+			body: new URLSearchParams({
+				client_id: this._userPoolClientId,
+				logout_uri: redirectURI,
+			}).toString(),
+		};
+		fetch(logoutUrl, logoutInit).catch(() => {
+			// Logout call failed, but we still redirect the user
+		});
 
-		const logoutUrl = `https://${this._userPoolDomain}/logout?client_id=${this._userPoolClientId}&logout_uri=${t}`;
-
-		const response = this._buildRedirectResponse(logoutUrl, responseCookies);
+		const response = this._buildRedirectResponse(redirectURI, responseCookies);
 
 		this._logger.debug({ msg: 'Generated set-cookie response', response });
 
