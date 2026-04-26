@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
+import { vi, type MockInstance } from 'vitest';
 import axios from 'axios';
 import {
 	CloudFrontRequest,
@@ -54,8 +55,8 @@ describe('private functions', () => {
 	let authenticator: TestAuthenticator;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new TestAuthenticator({
 			region: 'us-east-1',
@@ -69,12 +70,12 @@ describe('private functions', () => {
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test('should fetch token', async () => {
-		jest.spyOn(axios, 'request').mockResolvedValue({ data: tokenData });
+		vi.spyOn(axios, 'request').mockResolvedValue({ data: tokenData });
 
 		const res = await authenticator._fetchTokensFromCode(
 			'htt://redirect',
@@ -90,7 +91,7 @@ describe('private functions', () => {
 
 	test('should throw if unable to fetch token', async () => {
 		const unexpectedError = new Error('Unexpected error');
-		jest.spyOn(axios, 'request').mockRejectedValue(unexpectedError);
+		vi.spyOn(axios, 'request').mockRejectedValue(unexpectedError);
 
 		await expect(() =>
 			authenticator._fetchTokensFromCode('htt://redirect', 'AUTH_CODE'),
@@ -1117,18 +1118,18 @@ describe('createAuthenticator', () => {
 
 describe('handle', () => {
 	let authenticator: TestAuthenticator;
-	let spyJwtVerify: jest.SpyInstance;
-	let spyGetTokensFromCookie: jest.SpyInstance;
-	let spyGetTokensFromCode: jest.SpyInstance;
-	let spyFetchTokensFromRefreshToken: jest.SpyInstance;
-	let spyGetRedirectResponse: jest.SpyInstance;
-	let spyGetRedirectToCognitoUserPoolResponse: jest.SpyInstance;
-	let spyRevokeTokens: jest.SpyInstance;
-	let spyClearCookies: jest.SpyInstance;
+	let spyJwtVerify: MockInstance;
+	let spyGetTokensFromCookie: MockInstance;
+	let spyGetTokensFromCode: MockInstance;
+	let spyFetchTokensFromRefreshToken: MockInstance;
+	let spyGetRedirectResponse: MockInstance;
+	let spyGetRedirectToCognitoUserPoolResponse: MockInstance;
+	let spyRevokeTokens: MockInstance;
+	let spyClearCookies: MockInstance;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new TestAuthenticator({
 			region: 'us-east-1',
@@ -1138,25 +1139,25 @@ describe('handle', () => {
 			cookieExpirationDays: 365,
 		});
 		authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
-		spyGetTokensFromCookie = jest.spyOn(authenticator, '_getTokensFromCookie');
-		spyGetTokensFromCode = jest.spyOn(authenticator, '_fetchTokensFromCode');
-		spyFetchTokensFromRefreshToken = jest.spyOn(
+		spyGetTokensFromCookie = vi.spyOn(authenticator, '_getTokensFromCookie');
+		spyGetTokensFromCode = vi.spyOn(authenticator, '_fetchTokensFromCode');
+		spyFetchTokensFromRefreshToken = vi.spyOn(
 			authenticator,
 			'_fetchTokensFromRefreshToken',
 		);
-		spyGetRedirectResponse = jest.spyOn(authenticator, '_getRedirectResponse');
-		spyGetRedirectToCognitoUserPoolResponse = jest.spyOn(
+		spyGetRedirectResponse = vi.spyOn(authenticator, '_getRedirectResponse');
+		spyGetRedirectToCognitoUserPoolResponse = vi.spyOn(
 			authenticator,
 			'_getRedirectToCognitoUserPoolResponse',
 		);
-		spyRevokeTokens = jest.spyOn(authenticator, '_revokeTokens');
-		spyClearCookies = jest.spyOn(authenticator, '_clearCookies');
-		spyJwtVerify = jest.spyOn(authenticator._jwtVerifier, 'verify');
+		spyRevokeTokens = vi.spyOn(authenticator, '_revokeTokens');
+		spyClearCookies = vi.spyOn(authenticator, '_clearCookies');
+		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, 'verify');
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test('should forward request if authenticated', async () => {
@@ -1529,7 +1530,7 @@ describe('handle', () => {
 		});
 
 		test('should handle case where relative path is missing / prefix)', async () => {
-			jest.spyOn(authenticator._jwtVerifier, 'verify');
+			vi.spyOn(authenticator._jwtVerifier, 'verify');
 			spyJwtVerify.mockResolvedValueOnce(createMockCognitoPayload('toto'));
 
 			const response = await authenticator._getRedirectResponse(
@@ -1593,13 +1594,13 @@ describe('handle', () => {
 
 describe('handleSignIn', () => {
 	let authenticator: Authenticator;
-	let spyGetTokensFromCookie: jest.SpyInstance;
-	let spyRedirectToCognito: jest.SpyInstance;
-	let spyJwtVerify: jest.SpyInstance;
+	let spyGetTokensFromCookie: MockInstance;
+	let spyRedirectToCognito: MockInstance;
+	let spyJwtVerify: MockInstance;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new Authenticator({
 			region: 'us-east-1',
@@ -1610,17 +1611,17 @@ describe('handleSignIn', () => {
 			parseAuthPath: 'parseAuth',
 		});
 		authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
-		spyGetTokensFromCookie = jest.spyOn(authenticator, '_getTokensFromCookie');
-		spyRedirectToCognito = jest.spyOn(
+		spyGetTokensFromCookie = vi.spyOn(authenticator, '_getTokensFromCookie');
+		spyRedirectToCognito = vi.spyOn(
 			authenticator,
 			'_getRedirectToCognitoUserPoolResponse',
 		);
-		spyJwtVerify = jest.spyOn(authenticator._jwtVerifier, 'verify');
+		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, 'verify');
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test('should forward request if authenticated', async () => {
@@ -1665,13 +1666,13 @@ describe('handleSignIn', () => {
 
 describe('handleParseAuth', () => {
 	let authenticator: Authenticator;
-	let spyValidateCSRFCookies: jest.SpyInstance;
-	let spyGetTokensFromCode: jest.SpyInstance;
-	let spyGetRedirectResponse: jest.SpyInstance;
+	let spyValidateCSRFCookies: MockInstance;
+	let spyGetTokensFromCode: MockInstance;
+	let spyGetRedirectResponse: MockInstance;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new Authenticator({
 			region: 'us-east-1',
@@ -1682,14 +1683,14 @@ describe('handleParseAuth', () => {
 			parseAuthPath: 'parseAuth',
 		});
 		authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
-		spyValidateCSRFCookies = jest.spyOn(authenticator, '_validateCSRFCookies');
-		spyGetTokensFromCode = jest.spyOn(authenticator, '_fetchTokensFromCode');
-		spyGetRedirectResponse = jest.spyOn(authenticator, '_getRedirectResponse');
+		spyValidateCSRFCookies = vi.spyOn(authenticator, '_validateCSRFCookies');
+		spyGetTokensFromCode = vi.spyOn(authenticator, '_fetchTokensFromCode');
+		spyGetRedirectResponse = vi.spyOn(authenticator, '_getRedirectResponse');
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	describe('if code is present', () => {
@@ -1781,14 +1782,14 @@ describe('handleParseAuth', () => {
 
 describe('handleRefreshToken', () => {
 	let authenticator: Authenticator;
-	let spyGetTokensFromCookie: jest.SpyInstance;
-	let spyJwtVerify: jest.SpyInstance;
-	let spyFetchTokensFromRefreshToken: jest.SpyInstance;
-	let spyGetRedirectResponse: jest.SpyInstance;
+	let spyGetTokensFromCookie: MockInstance;
+	let spyJwtVerify: MockInstance;
+	let spyFetchTokensFromRefreshToken: MockInstance;
+	let spyGetRedirectResponse: MockInstance;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new Authenticator({
 			region: 'us-east-1',
@@ -1798,19 +1799,19 @@ describe('handleRefreshToken', () => {
 			cookieExpirationDays: 365,
 		});
 		authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
-		spyGetTokensFromCookie = jest.spyOn(authenticator, '_getTokensFromCookie');
-		spyJwtVerify = jest.spyOn(authenticator._jwtVerifier, 'verify');
-		spyFetchTokensFromRefreshToken = jest.spyOn(
+		spyGetTokensFromCookie = vi.spyOn(authenticator, '_getTokensFromCookie');
+		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, 'verify');
+		spyFetchTokensFromRefreshToken = vi.spyOn(
 			authenticator,
 			'_fetchTokensFromRefreshToken',
 		);
-		spyGetRedirectResponse = jest.spyOn(authenticator, '_getRedirectResponse');
-		jest.spyOn(authenticator, '_getRedirectToCognitoUserPoolResponse');
+		spyGetRedirectResponse = vi.spyOn(authenticator, '_getRedirectResponse');
+		vi.spyOn(authenticator, '_getRedirectToCognitoUserPoolResponse');
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test('should refresh tokens successfully', async () => {
@@ -1859,13 +1860,13 @@ describe('handleRefreshToken', () => {
 
 describe('handleSignOut', () => {
 	let authenticator: Authenticator;
-	let spyGetTokensFromCookie: jest.SpyInstance;
-	let spyRevokeTokens: jest.SpyInstance;
-	let spyClearCookies: jest.SpyInstance;
+	let spyGetTokensFromCookie: MockInstance;
+	let spyRevokeTokens: MockInstance;
+	let spyClearCookies: MockInstance;
 
 	beforeEach(() => {
-		jest.useFakeTimers();
-		jest.setSystemTime(TEST_DATE);
+		vi.useFakeTimers();
+		vi.setSystemTime(TEST_DATE);
 
 		authenticator = new Authenticator({
 			region: 'us-east-1',
@@ -1875,14 +1876,14 @@ describe('handleSignOut', () => {
 			cookieExpirationDays: 365,
 		});
 		authenticator._jwtVerifier.cacheJwks(jwksData, 'us-east-1_abcdef123');
-		spyGetTokensFromCookie = jest.spyOn(authenticator, '_getTokensFromCookie');
-		spyRevokeTokens = jest.spyOn(authenticator, '_revokeTokens');
-		spyClearCookies = jest.spyOn(authenticator, '_clearCookies');
+		spyGetTokensFromCookie = vi.spyOn(authenticator, '_getTokensFromCookie');
+		spyRevokeTokens = vi.spyOn(authenticator, '_revokeTokens');
+		spyClearCookies = vi.spyOn(authenticator, '_clearCookies');
 	});
 
 	afterEach(() => {
-		jest.useRealTimers();
-		jest.restoreAllMocks();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test('should revoke tokens and clear cookies successfully', async () => {

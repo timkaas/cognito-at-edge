@@ -1,31 +1,53 @@
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
-import type {
-	CloudFrontRequest,
-	CloudFrontRequestEvent,
-	CloudFrontResultResponse,
-} from 'aws-lambda';
+import type { CloudFrontRequest, CloudFrontRequestEvent, CloudFrontResultResponse } from 'aws-lambda';
 import axios from 'axios';
-import { pino } from 'pino';
 import { parse, stringify } from 'querystring';
 import {
 	CookieAttributes,
 	CookieSettingsOverrides,
 	CookieType,
-	parseCookies,
-	serializeCookie,
-	SAME_SITE_VALUES,
-	SameSite,
 	getCookieDomain,
+	parseCookies,
+	SameSite,
+	serializeCookie
 } from './util/cookie';
 import {
 	CSRFTokens,
+	generateCSRFTokens,
 	NONCE_COOKIE_NAME_SUFFIX,
 	NONCE_HMAC_COOKIE_NAME_SUFFIX,
 	PKCE_COOKIE_NAME_SUFFIX,
-	generateCSRFTokens,
 	signNonce,
-	urlSafe,
+	urlSafe
 } from './util/csrf';
+import { CognitoIdTokenPayload } from 'aws-jwt-verify/jwt-model';
+
+type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
+
+interface Logger {
+	debug(...args: unknown[]): void;
+	info(...args: unknown[]): void;
+	error(...args: unknown[]): void;
+}
+
+function createLogger(level: LogLevel = 'silent'): Logger {
+	const levels: Record<LogLevel, number> = {
+		trace: 10,
+		debug: 20,
+		info: 30,
+		warn: 40,
+		error: 50,
+		fatal: 60,
+		silent: Infinity,
+	};
+	const minLevel = levels[level] ?? Infinity;
+	const noop = () => {};
+	return {
+		debug: minLevel <= 20 ? (console.debug.bind(console) as (...args: unknown[]) => void) : noop,
+		info: minLevel <= 30 ? (console.info.bind(console) as (...args: unknown[]) => void) : noop,
+		error: minLevel <= 50 ? (console.error.bind(console) as (...args: unknown[]) => void) : noop,
+	};
+}
 
 export interface AuthenticatorParams {
 	region: string;
@@ -37,7 +59,7 @@ export interface AuthenticatorParams {
 	disableCookieDomain?: boolean;
 	httpOnly?: boolean;
 	sameSite?: SameSite;
-	logLevel?: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
+	logLevel?: LogLevel;
 	cookiePath?: string;
 	cookieDomain?: string;
 	cookieSettingsOverrides?: CookieSettingsOverrides;
@@ -61,34 +83,39 @@ interface Tokens {
 	expires_in?: number;
 }
 
+const MS_PER_DAY = 864e5;
+const CSRF_COOKIE_TTL_MS = 10 * 60 * 1000;
+const NO_CACHE_VALUE = 'no-cache, no-store, max-age=0, must-revalidate';
+const COGNITO_TOKEN_SCOPES = 'phone email profile openid aws.cognito.signin.user.admin';
+
 export class Authenticator {
-	_region: string;
-	_userPoolId: string;
-	_userPoolAppId: string;
-	_userPoolAppSecret: string | undefined;
-	_userPoolDomain: string;
-	_cookieExpirationDays: number;
-	_disableCookieDomain: boolean;
-	_httpOnly: boolean;
-	_sameSite?: SameSite;
-	_cookieBase: string;
-	_cookiePath?: string;
-	_cookieDomain?: string;
-	_csrfProtection?: {
+	private readonly _region: string;
+	private readonly _userPoolId: string;
+	private readonly _userPoolClientId: string;
+	private readonly _userPoolClientSecret: string | undefined;
+	private readonly _userPoolDomain: string;
+	private readonly _cookieExpirationDays: number;
+	private readonly _disableCookieDomain: boolean;
+	private readonly _httpOnly: boolean;
+	private readonly _sameSite?: SameSite;
+	private readonly _cookieBase: string;
+	private readonly _cookiePath?: string;
+	private readonly _cookieDomain?: string;
+	private readonly _csrfProtection?: {
 		nonceSigningSecret: string;
 	};
-	_logoutConfiguration?: LogoutConfiguration;
-	_parseAuthPath?: string;
-	_cookieSettingsOverrides?: CookieSettingsOverrides;
-	_logger;
-	_jwtVerifier;
+	private readonly _logoutConfiguration?: LogoutConfiguration;
+	private readonly _parseAuthPath?: string;
+	private readonly _cookieSettingsOverrides?: CookieSettingsOverrides;
+	private readonly _logger: Logger;
+	private readonly _jwtVerifier;
+	private readonly _tokenCache: Map<string, { payload: CognitoIdTokenPayload; expSec: number }>;
 
 	constructor(params: AuthenticatorParams) {
-		this._verifyParams(params);
 		this._region = params.region;
 		this._userPoolId = params.userPoolId;
-		this._userPoolAppId = params.userPoolAppId;
-		this._userPoolAppSecret = params.userPoolAppSecret;
+		this._userPoolClientId = params.userPoolAppId;
+		this._userPoolClientSecret = params.userPoolAppSecret;
 		this._userPoolDomain = params.userPoolDomain;
 		this._cookieExpirationDays = params.cookieExpirationDays || 365;
 		this._disableCookieDomain =
@@ -99,70 +126,61 @@ export class Authenticator {
 		this._cookieBase = `CognitoIdentityServiceProvider.${params.userPoolAppId}`;
 		this._cookiePath = params.cookiePath;
 		this._cookieSettingsOverrides = params.cookieSettingsOverrides || {};
-		this._logger = pino({
-			level: params.logLevel || 'silent', // Default to silent
-			base: null, //Remove pid, hostname and name logging as not usefull for Lambda
-		});
+		this._logger = createLogger(params.logLevel);
 		this._jwtVerifier = CognitoJwtVerifier.create({
 			userPoolId: params.userPoolId,
 			clientId: params.userPoolAppId,
 			tokenUse: 'id',
+		});
+		this._tokenCache = new Map();
+		this._jwtVerifier.hydrate().catch(() => {
+			// JWKS will be fetched on first verify() if this fails — no action needed
 		});
 		this._csrfProtection = params.csrfProtection;
 		this._logoutConfiguration = params.logoutConfiguration;
 		this._parseAuthPath = (params.parseAuthPath || '').replace(/^\//, '');
 	}
 
-	/**
-	 * Verify that constructor parameters are corrects.
-	 * @param  {object} params constructor params
-	 * @return {void} throw an exception if params are incorects.
-	 */
-	_verifyParams(params: AuthenticatorParams) {
-		if (typeof params !== 'object') {
-			throw new Error('Expected params to be an object');
+	async hydrate(): Promise<void> {
+		await this._jwtVerifier.hydrate();
+	}
+
+	private async _verifyIdToken(idToken: string) {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const cached = this._tokenCache.get(idToken);
+		if (cached && nowSec < cached.expSec) {
+			return cached.payload;
 		}
-		['region', 'userPoolId', 'userPoolAppId', 'userPoolDomain'].forEach(
-			(param) => {
-				if (typeof params[param as keyof AuthenticatorParams] !== 'string') {
-					throw new Error(`Expected params.${param} to be a string`);
-				}
+		const payload = await this._jwtVerifier.verify(idToken);
+		this._tokenCache.set(idToken, {
+			payload,
+			expSec: (payload as Record<string, number>).exp ?? nowSec,
+		});
+		return payload;
+	}
+
+	private async _postToTokenEndpoint<T>(
+		data: Record<string, string>,
+		logCtx: Record<string, unknown>,
+	): Promise<T> {
+		const authorization = this._getAuthorization();
+		const request = {
+			url: `https://${this._userPoolDomain}/oauth2/token`,
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+				...(authorization && { Authorization: `Basic ${authorization}` }),
 			},
-		);
-		if (
-			params.cookieExpirationDays &&
-			typeof params.cookieExpirationDays !== 'number'
-		) {
-			throw new Error('Expected params.cookieExpirationDays to be a number');
-		}
-		if (
-			'disableCookieDomain' in params &&
-			typeof params.disableCookieDomain !== 'boolean'
-		) {
-			throw new Error('Expected params.disableCookieDomain to be boolean');
-		}
-		if ('cookieDomain' in params && typeof params.cookieDomain !== 'string') {
-			throw new Error('Expected params.cookieDomain to be a string');
-		}
-		if ('httpOnly' in params && typeof params.httpOnly !== 'boolean') {
-			throw new Error('Expected params.httpOnly to be a boolean');
-		}
-		if (
-			params.sameSite !== undefined &&
-			!SAME_SITE_VALUES.includes(params.sameSite)
-		) {
-			throw new Error('Expected params.sameSite to be a Strict || Lax || None');
-		}
-		if ('cookiePath' in params && typeof params.cookiePath !== 'string') {
-			throw new Error('Expected params.cookiePath to be a string');
-		}
-		if (
-			params.logoutConfiguration &&
-			!/\/\w+/.test(params.logoutConfiguration.logoutUri)
-		) {
-			throw new Error(
-				'Expected params.logoutConfiguration.logoutUri to be a valid non-empty string starting with "/"',
-			);
+			data: stringify(data),
+		} as const;
+		this._logger.debug({ ...logCtx, request });
+		try {
+			const resp = await axios.request<T>(request);
+			this._logger.debug({ ...logCtx, tokens: resp.data });
+			return resp.data;
+		} catch (err) {
+			this._logger.error({ ...logCtx, request });
+			throw err;
 		}
 	}
 
@@ -172,49 +190,28 @@ export class Authenticator {
 	 * @param  {String} code        Authorization code.
 	 * @return {Promise} Authenticated user tokens.
 	 */
-	_fetchTokensFromCode(redirectURI: string, code: string): Promise<Tokens> {
-		const authorization = this._getAuthorization();
-		const request = {
-			url: `https://${this._userPoolDomain}/oauth2/token`,
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
-				...(authorization && { Authorization: `Basic ${authorization}` }),
-			},
-			data: stringify({
-				client_id: this._userPoolAppId,
+	async _fetchTokensFromCode(
+		redirectURI: string,
+		code: string,
+	): Promise<Tokens> {
+		const resp = await this._postToTokenEndpoint<{
+			id_token: string;
+			access_token: string;
+			refresh_token: string;
+		}>(
+			{
+				client_id: this._userPoolClientId,
 				code: code,
 				grant_type: 'authorization_code',
 				redirect_uri: redirectURI,
-			}),
-		} as const;
-		this._logger.debug({
-			msg: 'Fetching tokens from grant code...',
-			request,
-			code,
-		});
-		return axios
-			.request<{
-				id_token: string;
-				access_token: string;
-				refresh_token: string;
-			}>(request)
-			.then((resp) => {
-				this._logger.debug({ msg: 'Fetched tokens', tokens: resp.data });
-				return {
-					idToken: resp.data.id_token,
-					accessToken: resp.data.access_token,
-					refreshToken: resp.data.refresh_token,
-				};
-			})
-			.catch((err: unknown) => {
-				this._logger.error({
-					msg: 'Unable to fetch tokens from grant code',
-					request,
-					code,
-				});
-				throw err;
-			});
+			},
+			{ msg: 'Fetching tokens from grant code...', code },
+		);
+		return {
+			idToken: resp.id_token,
+			accessToken: resp.access_token,
+			refreshToken: resp.refresh_token,
+		};
 	}
 
 	/**
@@ -223,59 +220,72 @@ export class Authenticator {
 	 * @param  {String} refreshToken Refresh token.
 	 * @return {Promise<Tokens>} Refreshed user tokens.
 	 */
-	_fetchTokensFromRefreshToken(
+	async _fetchTokensFromRefreshToken(
 		redirectURI: string,
 		refreshToken: string,
 	): Promise<Tokens> {
-		const authorization = this._getAuthorization();
-		const request = {
-			url: `https://${this._userPoolDomain}/oauth2/token`,
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded',
-				...(authorization && { Authorization: `Basic ${authorization}` }),
-			},
-			data: stringify({
-				client_id: this._userPoolAppId,
+		const resp = await this._postToTokenEndpoint<{
+			id_token: string;
+			access_token: string;
+		}>(
+			{
+				client_id: this._userPoolClientId,
 				refresh_token: refreshToken,
 				grant_type: 'refresh_token',
 				redirect_uri: redirectURI,
-			}),
-		} as const;
-		this._logger.debug({
-			msg: 'Fetching tokens from refreshToken...',
-			request,
-			refreshToken,
-		});
-		return axios
-			.request<{
-				id_token: string;
-				access_token: string;
-			}>(request)
-			.then((resp) => {
-				this._logger.debug({ msg: 'Fetched tokens', tokens: resp.data });
-				return {
-					idToken: resp.data.id_token,
-					accessToken: resp.data.access_token,
-				};
-			})
-			.catch((err: unknown) => {
-				this._logger.error({
-					msg: 'Unable to fetch tokens from refreshToken',
-					request,
-					refreshToken,
-				});
-				throw err;
-			});
+			},
+			{ msg: 'Fetching tokens from refreshToken...', refreshToken },
+		);
+		return {
+			idToken: resp.id_token,
+			accessToken: resp.access_token,
+		};
 	}
 
 	_getAuthorization(): string | undefined {
 		return (
-			this._userPoolAppSecret &&
-			Buffer.from(`${this._userPoolAppId}:${this._userPoolAppSecret}`).toString(
-				'base64',
-			)
+			this._userPoolClientSecret &&
+			Buffer.from(
+				`${this._userPoolClientId}:${this._userPoolClientSecret}`,
+			).toString('base64')
 		);
+	}
+
+	private _getCFDomain(request: CloudFrontRequest): string {
+		return request.headers.host[0].value;
+	}
+
+	private _getRedirectURI(cfDomain: string, requestParams: ReturnType<typeof parse>): string {
+		return (requestParams.redirect_uri as string) || `https://${cfDomain}`;
+	}
+
+	private _buildBaseCookieAttributes(domain?: string, expires?: Date): CookieAttributes {
+		return {
+			domain,
+			expires,
+			secure: true,
+			httpOnly: this._httpOnly,
+			sameSite: this._sameSite,
+			path: this._cookiePath,
+		};
+	}
+
+	private _getParseAuthOrFallbackURI(cfDomain: string, fallback: string): string {
+		return this._parseAuthPath
+			? `https://${cfDomain}/${this._parseAuthPath}`
+			: fallback;
+	}
+
+	private _buildRedirectResponse(location: string, cookies?: string[]): CloudFrontResultResponse {
+		return {
+			status: '302',
+			headers: {
+				location: [{ key: 'Location', value: location }],
+				'cache-control': [{ key: 'Cache-Control', value: NO_CACHE_VALUE }],
+				pragma: [{ key: 'Pragma', value: 'no-cache' }],
+				...(cookies && { 'set-cookie': cookies.map((c) => ({ key: 'Set-Cookie', value: c })) }),
+			},
+		};
 	}
 
 	_validateCSRFCookies(request: CloudFrontRequest) {
@@ -354,7 +364,7 @@ export class Authenticator {
 				res.path = overrides.path;
 			}
 			if (overrides.expirationDays !== undefined) {
-				res.expires = new Date(Date.now() + overrides.expirationDays * 864e5);
+				res.expires = new Date(Date.now() + overrides.expirationDays * MS_PER_DAY);
 			}
 		}
 		this._logger.debug({
@@ -378,7 +388,7 @@ export class Authenticator {
 		domain: string,
 		path: string,
 	): Promise<CloudFrontResultResponse> {
-		const decoded = await this._jwtVerifier.verify(tokens.idToken as string);
+		const decoded = await this._verifyIdToken(tokens.idToken as string);
 		const username = decoded['cognito:username'];
 		const usernameBase = `${this._cookieBase}.${username}`;
 		const cookieDomain = getCookieDomain(
@@ -386,14 +396,10 @@ export class Authenticator {
 			this._disableCookieDomain,
 			this._cookieDomain,
 		);
-		const cookieAttributes: CookieAttributes = {
-			domain: cookieDomain,
-			expires: new Date(Date.now() + this._cookieExpirationDays * 864e5),
-			secure: true,
-			httpOnly: this._httpOnly,
-			sameSite: this._sameSite,
-			path: this._cookiePath,
-		};
+		const cookieAttributes = this._buildBaseCookieAttributes(
+			cookieDomain,
+			new Date(Date.now() + this._cookieExpirationDays * MS_PER_DAY),
+		);
 		const cookies = [
 			serializeCookie(
 				`${usernameBase}.accessToken`,
@@ -419,7 +425,7 @@ export class Authenticator {
 				: []),
 			serializeCookie(
 				`${usernameBase}.tokenScopesString`,
-				'phone email profile openid aws.cognito.signin.user.admin',
+				COGNITO_TOKEN_SCOPES,
 				cookieAttributes,
 			),
 			serializeCookie(
@@ -457,31 +463,8 @@ export class Authenticator {
 			);
 		}
 
-		const response: CloudFrontResultResponse = {
-			status: '302',
-			headers: {
-				location: [
-					{
-						key: 'Location',
-						value:
-							'https://' + domain + (path.startsWith('/') ? '' : '/') + path,
-					},
-				],
-				'cache-control': [
-					{
-						key: 'Cache-Control',
-						value: 'no-cache, no-store, max-age=0, must-revalidate',
-					},
-				],
-				pragma: [
-					{
-						key: 'Pragma',
-						value: 'no-cache',
-					},
-				],
-				'set-cookie': cookies.map((c) => ({ key: 'Set-Cookie', value: c })),
-			},
-		};
+		const locationUrl = 'https://' + domain + (path.startsWith('/') ? '' : '/') + path;
+		const response = this._buildRedirectResponse(locationUrl, cookies);
 
 		this._logger.debug({ msg: 'Generated set-cookie response', response });
 
@@ -615,7 +598,7 @@ export class Authenticator {
 				...(authorization && { Authorization: `Basic ${authorization}` }),
 			},
 			data: stringify({
-				client_id: this._userPoolAppId,
+				client_id: this._userPoolClientId,
 				token: tokens.refreshToken,
 			}),
 		} as const;
@@ -648,7 +631,7 @@ export class Authenticator {
 	): Promise<CloudFrontResultResponse> {
 		this._logger.info({ msg: 'Clearing cookies...', event, tokens });
 		const { request } = event.Records[0].cf;
-		const cfDomain = request.headers.host[0].value;
+		const cfDomain = this._getCFDomain(request);
 		const requestParams = parse(request.querystring);
 		const redirectURI =
 			this._logoutConfiguration?.logoutRedirectUri ||
@@ -660,18 +643,14 @@ export class Authenticator {
 			this._disableCookieDomain,
 			this._cookieDomain,
 		);
-		const cookieAttributes: CookieAttributes = {
-			domain: cookieDomain,
-			expires: new Date(),
-			secure: true,
-			httpOnly: this._httpOnly,
-			sameSite: this._sameSite,
-			path: this._cookiePath,
-		};
+		const cookieAttributes = this._buildBaseCookieAttributes(
+			cookieDomain,
+			new Date(),
+		);
 
 		let responseCookies: string[] = [];
 		try {
-			const decoded = await this._jwtVerifier.verify(tokens.idToken as string);
+			const decoded = await this._verifyIdToken(tokens.idToken as string);
 			const username = decoded['cognito:username'];
 			this._logger.info({
 				msg: 'Token verified. Clearing cookies...',
@@ -718,33 +697,11 @@ export class Authenticator {
 			}
 		}
 
-		const response: CloudFrontResultResponse = {
-			status: '302',
-			headers: {
-				location: [
-					{
-						key: 'Location',
-						value: redirectURI,
-					},
-				],
-				'cache-control': [
-					{
-						key: 'Cache-Control',
-						value: 'no-cache, no-store, max-age=0, must-revalidate',
-					},
-				],
-				pragma: [
-					{
-						key: 'Pragma',
-						value: 'no-cache',
-					},
-				],
-				'set-cookie': responseCookies.map((c) => ({
-					key: 'Set-Cookie',
-					value: c,
-				})),
-			},
-		};
+		const t = encodeURIComponent(redirectURI);
+
+		const logoutUrl = `https://${this._userPoolDomain}/logout?client_id=${this._userPoolClientId}&logout_uri=${t}`;
+
+		const response = this._buildRedirectResponse(logoutUrl, responseCookies);
 
 		this._logger.debug({ msg: 'Generated set-cookie response', response });
 
@@ -779,14 +736,14 @@ export class Authenticator {
 		const params = new URLSearchParams({
 			redirect_uri: redirectURI,
 			response_type: 'code',
-			client_id: this._userPoolAppId,
+			client_id: this._userPoolClientId,
 		});
 
 		if (state) {
 			params.append('state', state);
 		}
 
-		const userPoolUrl = `https://${this._userPoolDomain}/authorize?${params}`;
+		const userPoolUrl = `https://${this._userPoolDomain}/oauth2/authorize?${params}`;
 
 		this._logger.debug(
 			`Redirecting user to Cognito User Pool URL ${userPoolUrl}`,
@@ -794,13 +751,10 @@ export class Authenticator {
 
 		let cookies: string[] | undefined;
 		if (this._csrfProtection) {
-			const cookieAttributes: CookieAttributes = {
-				expires: new Date(Date.now() + 10 * 60 * 1000),
-				secure: true,
-				httpOnly: this._httpOnly,
-				sameSite: this._sameSite,
-				path: this._cookiePath,
-			};
+			const cookieAttributes = this._buildBaseCookieAttributes(
+				undefined,
+				new Date(Date.now() + CSRF_COOKIE_TTL_MS),
+			);
 			cookies = [
 				serializeCookie(
 					`${this._cookieBase}.${PKCE_COOKIE_NAME_SUFFIX}`,
@@ -820,39 +774,7 @@ export class Authenticator {
 			];
 		}
 
-		const response: CloudFrontResultResponse = {
-			status: '302',
-			headers: {
-				location: [
-					{
-						key: 'Location',
-						value: userPoolUrl,
-					},
-				],
-				'cache-control': [
-					{
-						key: 'Cache-Control',
-						value: 'no-cache, no-store, max-age=0, must-revalidate',
-					},
-				],
-				pragma: [
-					{
-						key: 'Pragma',
-						value: 'no-cache',
-					},
-				],
-				...(cookies
-					? {
-							'set-cookie': cookies.map((c) => ({
-								key: 'Set-Cookie',
-								value: c,
-							})),
-						}
-					: {}),
-			},
-		};
-
-		return response;
+		return this._buildRedirectResponse(userPoolUrl, cookies);
 	}
 
 	/**
@@ -870,10 +792,8 @@ export class Authenticator {
 		this._logger.debug({ msg: 'Handling Lambda@Edge event', event });
 
 		const { request } = event.Records[0].cf;
-		const cfDomain = request.headers.host[0].value;
-		const redirectURI = this._parseAuthPath
-			? `https://${cfDomain}/${this._parseAuthPath}`
-			: `https://${cfDomain}`;
+		const cfDomain = this._getCFDomain(request);
+		const redirectURI = this._getParseAuthOrFallbackURI(cfDomain, `https://${cfDomain}`);
 
 		try {
 			const tokens = this._getTokensFromCookie(request.headers.cookie);
@@ -889,7 +809,7 @@ export class Authenticator {
 			}
 			try {
 				this._logger.debug({ msg: 'Verifying token...', tokens });
-				const user = await this._jwtVerifier.verify(tokens.idToken as string);
+				const user = await this._verifyIdToken(tokens.idToken as string);
 				this._logger.info({
 					msg: 'Forwarding request',
 					path: request.uri,
@@ -961,15 +881,14 @@ export class Authenticator {
 
 		const { request } = event.Records[0].cf;
 		const requestParams = parse(request.querystring);
-		const cfDomain = request.headers.host[0].value;
-		const redirectURI =
-			(requestParams.redirect_uri as string) || `https://${cfDomain}`;
+		const cfDomain = this._getCFDomain(request);
+		const redirectURI = this._getRedirectURI(cfDomain, requestParams);
 
 		try {
 			const tokens = this._getTokensFromCookie(request.headers.cookie);
 
 			this._logger.debug({ msg: 'Verifying token...', tokens });
-			const user = await this._jwtVerifier.verify(tokens.idToken as string);
+			const user = await this._verifyIdToken(tokens.idToken as string);
 
 			this._logger.info({
 				msg: 'Redirecting user to',
@@ -991,9 +910,7 @@ export class Authenticator {
 			this._logger.debug("User isn't authenticated: %s", err);
 			return this._getRedirectToCognitoUserPoolResponse(
 				request,
-				this._parseAuthPath
-					? `https://${cfDomain}/${this._parseAuthPath}`
-					: redirectURI,
+				this._getParseAuthOrFallbackURI(cfDomain, redirectURI),
 			);
 		}
 	}
@@ -1015,7 +932,7 @@ export class Authenticator {
 		this._logger.debug({ msg: 'Handling Lambda@Edge event', event });
 
 		const { request } = event.Records[0].cf;
-		const cfDomain = request.headers.host[0].value;
+		const cfDomain = this._getCFDomain(request);
 		const requestParams = parse(request.querystring);
 
 		try {
@@ -1064,16 +981,15 @@ export class Authenticator {
 		this._logger.debug({ msg: 'Handling Lambda@Edge event', event });
 
 		const { request } = event.Records[0].cf;
-		const cfDomain = request.headers.host[0].value;
+		const cfDomain = this._getCFDomain(request);
 		const requestParams = parse(request.querystring);
-		const redirectURI =
-			(requestParams.redirect_uri as string) || `https://${cfDomain}`;
+		const redirectURI = this._getRedirectURI(cfDomain, requestParams);
 
 		try {
 			let tokens = this._getTokensFromCookie(request.headers.cookie);
 
 			this._logger.debug({ msg: 'Verifying token...', tokens });
-			const user = await this._jwtVerifier.verify(tokens.idToken as string);
+			const user = await this._verifyIdToken(tokens.idToken as string);
 
 			this._logger.debug({ msg: 'Refreshing tokens...', tokens, user });
 			tokens = await this._fetchTokensFromRefreshToken(
@@ -1087,9 +1003,7 @@ export class Authenticator {
 			this._logger.debug("User isn't authenticated: %s", err);
 			return this._getRedirectToCognitoUserPoolResponse(
 				request,
-				this._parseAuthPath
-					? `https://${cfDomain}/${this._parseAuthPath}`
-					: redirectURI,
+				this._getParseAuthOrFallbackURI(cfDomain, redirectURI),
 			);
 		}
 	}
@@ -1111,9 +1025,8 @@ export class Authenticator {
 
 		const { request } = event.Records[0].cf;
 		const requestParams = parse(request.querystring);
-		const cfDomain = request.headers.host[0].value;
-		const redirectURI =
-			(requestParams.redirect_uri as string) || `https://${cfDomain}`;
+		const cfDomain = this._getCFDomain(request);
+		const redirectURI = this._getRedirectURI(cfDomain, requestParams);
 
 		try {
 			const tokens = this._getTokensFromCookie(request.headers.cookie);
