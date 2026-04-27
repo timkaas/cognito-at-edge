@@ -158,7 +158,7 @@ export class Authenticator {
 		this.tokenCache.set(idToken, {
 			payload,
 			// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-			expSec: (payload as Record<string, number>).exp ?? nowSec,
+			expSec: payload.exp ?? nowSec,
 		})
 		return payload
 	}
@@ -550,6 +550,7 @@ export class Authenticator {
 
 	async clearCookies(event: CloudFrontRequestEvent, tokens: Tokens = {}): Promise<CloudFrontResultResponse> {
 		this.logger.info({ msg: "Clearing cookies...", event, tokens })
+		this.tokenCache.clear()
 		const { request } = event.Records[0].cf
 		const cfDomain = this.getCFDomain(request)
 		const requestParams = parse(request.querystring)
@@ -595,9 +596,9 @@ export class Authenticator {
 
 		// Call logout endpoint server-side (fire and forget)
 		const params = new URLSearchParams({
-			"client_id": this.userPoolClientId,
-			"redirect_url": encodeURIComponent(redirectURI),
-			"response_type": "code"
+			client_id: this.userPoolClientId,
+			redirect_url: encodeURIComponent(redirectURI),
+			response_type: "code",
 		})
 		fetch(`https://${this.userPoolDomain}/logout?${params}`).catch(() => {
 			// Logout call failed, but we still redirect the user
@@ -728,6 +729,31 @@ export class Authenticator {
 			} else {
 				return this.getRedirectToCognitoUserPoolResponse(request, redirectURI)
 			}
+		}
+	}
+
+	/**
+	 * Check if user is authenticated:
+	 *   * if authentication cookie is present and valid: return true
+	 *   * else return false
+	 * @param  {Object}  event Lambda@Edge event.
+	 * @return {Boolean} True if user is authenticated.
+	 */
+	async isAuthenticated(event: CloudFrontRequestEvent) {
+		this.logger.debug({ msg: "Checking if Lambda@Edge event is authenticated", event })
+
+		const { request } = event.Records[0].cf
+
+		try {
+			const {idToken} = this.getTokensFromCookie(request.headers.cookie)
+			if (!idToken) {
+				return false
+			}
+			this.logger.debug({ msg: "Verifying token...", idToken })
+			await this.verifyIdToken(idToken)
+			return true
+		} catch {
+			return false
 		}
 	}
 
