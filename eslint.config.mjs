@@ -1,7 +1,5 @@
 import eslint from "@eslint/js"
 import tseslint from "typescript-eslint"
-import cdkPlugin from "eslint-plugin-awscdk";
-
 
 export default [
 	eslint.configs.recommended,
@@ -17,27 +15,20 @@ export default [
 	},
 	...tseslint.configs.strictTypeChecked,
 	...tseslint.configs.stylisticTypeChecked,
-	cdkPlugin.configs.recommended,
 	{
 		ignores: [
 			"node_modules/**",
 			"**/dist/**",
 			"build/**",
-			".turbo/**",
-			".next/**",
 			"**/*.mjs",
-			"cdk.out/**",
-			"functions/**",
-			"graphql/**",
-			"rest/**",
 			"temp/**",
+			"coverage/**",
+			"vitest.config.ts",
 		],
 	},
 	{
 		files: ["**/*.{ts,tsx}"],
 		rules: {
-			"awscdk/no-variable-construct-id": "off",
-			"awscdk/no-construct-stack-suffix": "off",
 			"@typescript-eslint/no-unused-vars": [
 				"warn",
 				{

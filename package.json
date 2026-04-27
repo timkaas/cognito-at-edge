@@ -15,9 +15,10 @@
 		"/dist"
 	],
 	"scripts": {
-		"build": "tsc",
-		"lint": "eslint --cache .",
 		"test": "vitest run --coverage",
+		"format": "prettier --config .prettierrc.toml 'src/**/*.ts' --write --list-different",
+		"lint": "yarn format && eslint . --ext .ts",
+		"build": "yarn lint && tsc",
 		"test:watch": "vitest",
 		"prepare": "husky"
 	},
@@ -30,13 +31,10 @@
 		"@types/node": "^25.6.0",
 		"@vitest/coverage-v8": "^2.1.8",
 		"eslint": "^10.2.1",
-		"eslint-config-prettier": "^10.1.8",
-		"eslint-import-resolver-typescript": "^4.4.4",
 		"globals": "^17.5.0",
 		"husky": "^9.1.7",
-		"jiti": "^2.6.1",
-		"lint-staged": "^16.4.0",
 		"prettier": "^3.8.3",
+		"prettier-plugin-organize-imports": "^4.3.0",
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.59.0",
 		"vitest": "^2.1.8"
@@ -53,12 +51,5 @@
 		"edge",
 		"private",
 		"website"
-	],
-	"lint-staged": {
-		"*.{js,ts,mts}": [
-			"eslint --fix",
-			"prettier --write"
-		],
-		"!(**/*.{js,jsx})": "prettier --write --ignore-unknown"
-	}
+	]
 }

@@ -1,10 +1,10 @@
 export interface Cookie {
-	name: string;
-	value: string;
+	name: string
+	value: string
 }
 
-export type SameSite = 'Strict' | 'Lax' | 'None';
-export const SAME_SITE_VALUES: SameSite[] = ['Strict', 'Lax', 'None'];
+export type SameSite = "Strict" | "Lax" | "None"
+export const SAME_SITE_VALUES: SameSite[] = ["Strict", "Lax", "None"]
 
 /**
  * Cookie attributes to be used inside 'Set-Cookie' header
@@ -14,76 +14,76 @@ export interface CookieAttributes {
 	 * The Domain attribute specifies those hosts to which the cookie will be sent.
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.3 RFC 6265 section 4.1.2.3.} for more details.
 	 */
-	domain?: string;
+	domain?: string
 
 	/**
 	 * The Expires attribute indicates the maximum lifetime of the cookie, represented as the date and time at which
 	 * the cookie expires.
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.1 RFC 6265 section 4.1.2.1.} for more details.
 	 */
-	expires?: Date;
+	expires?: Date
 
 	/**
 	 * The HttpOnly attribute limits the scope of the cookie to HTTP requests.
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.6 RFC 6265 section 4.1.2.6.} for more details.
 	 */
-	httpOnly?: boolean;
+	httpOnly?: boolean
 
 	/**
 	 * The SameSite attribute allows you to declare if your cookie should be restricted to a first-party or same-site context.
 	 * Refer to {@link https://httpwg.org/http-extensions/draft-ietf-httpbis-rfc6265bis.html#name-samesite-cookies RFC 6265 section 8.8.} for more details.
 	 */
-	sameSite?: SameSite;
+	sameSite?: SameSite
 
 	/**
 	 * The Max-Age attribute indicates the maximum lifetime of the cookie, represented as the number of seconds until
 	 * the cookie expires.
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.2 RFC 6265 section 4.1.2.2.} for more details.
 	 */
-	maxAge?: number;
+	maxAge?: number
 
 	/**
 	 * The scope of each cookie is limited to a set of paths, controlled by the Path attribute.
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.4 RFC 6265 section 4.1.2.4.} for more details.
 	 */
-	path?: string;
+	path?: string
 
 	/**
 	 * The Secure attribute limits the scope of the cookie to "secure" channels (where "secure" is defined by the user agent).
 	 * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2.5 RFC 6265 section 4.1.2.5.} for more details.
 	 */
-	secure?: boolean;
+	secure?: boolean
 }
 
-export type CookieType = 'idToken' | 'accessToken' | 'refreshToken';
+export type CookieType = "idToken" | "accessToken" | "refreshToken"
 
 export interface CookieSettings {
 	/**
 	 * Indicates the maximum lifetime of the cookie.
 	 */
-	expirationDays?: number;
+	expirationDays?: number
 
 	/**
 	 * Indicates the path that must exist in the requested URL for the browser to
 	 * send the Cookie header.
 	 */
-	path?: string;
+	path?: string
 
 	/**
 	 * Controls whether the cookie can be accessed by JavaScript.
 	 */
-	httpOnly?: boolean;
+	httpOnly?: boolean
 
 	/**
 	 * Controls whether or not a cookie is sent with cross-site requests
 	 */
-	sameSite?: SameSite;
+	sameSite?: SameSite
 }
 
 export interface CookieSettingsOverrides {
-	idToken?: CookieSettings;
-	accessToken?: CookieSettings;
-	refreshToken?: CookieSettings;
+	idToken?: CookieSettings
+	accessToken?: CookieSettings
+	refreshToken?: CookieSettings
 }
 
 /**
@@ -93,24 +93,24 @@ export interface CookieSettingsOverrides {
  * @returns array of {@type Cookie} objects
  */
 export function parseCookies(cookiesString: string): Cookie[] {
-	const cookieStrArray = cookiesString ? cookiesString.split(';') : [];
+	const cookieStrArray = cookiesString ? cookiesString.split(";") : []
 
-	const cookies: Cookie[] = [];
+	const cookies: Cookie[] = []
 
 	for (const cookieStr of cookieStrArray) {
-		const separatorIndex = cookieStr.indexOf('=');
+		const separatorIndex = cookieStr.indexOf("=")
 
 		if (separatorIndex < 0) {
-			continue;
+			continue
 		}
 
-		const name = decodeName(cookieStr.substring(0, separatorIndex).trim());
-		const value = decodeValue(cookieStr.substring(separatorIndex + 1).trim());
+		const name = decodeName(cookieStr.substring(0, separatorIndex).trim())
+		const value = decodeValue(cookieStr.substring(separatorIndex + 1).trim())
 
-		cookies.push({ name, value });
+		cookies.push({ name, value })
 	}
 
-	return cookies;
+	return cookies
 }
 
 /**
@@ -122,23 +122,18 @@ export function parseCookies(cookiesString: string): Cookie[] {
  * @param attributes cookie attributes
  * @returns string to be used as `Set-Cookie` header
  */
-export function serializeCookie(
-	name: string,
-	value: string,
-	attributes: CookieAttributes = {},
-): string {
+export function serializeCookie(name: string, value: string, attributes: CookieAttributes = {}): string {
 	return [
 		`${encodeName(name)}=${encodeValue(value)}`,
 		...(attributes.domain ? [`Domain=${attributes.domain}`] : []),
 		...(attributes.path ? [`Path=${attributes.path}`] : []),
-		...(attributes.expires
-			? [`Expires=${attributes.expires.toUTCString()}`]
-			: []),
+		...(attributes.expires ? [`Expires=${attributes.expires.toUTCString()}`] : []),
+		// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 		...(attributes.maxAge ? [`Max-Age=${attributes.maxAge}`] : []),
-		...(attributes.secure ? ['Secure'] : []),
-		...(attributes.httpOnly ? ['HttpOnly'] : []),
+		...(attributes.secure ? ["Secure"] : []),
+		...(attributes.httpOnly ? ["HttpOnly"] : []),
 		...(attributes.sameSite ? [`SameSite=${attributes.sameSite}`] : []),
-	].join('; ');
+	].join("; ")
 }
 
 /**
@@ -148,17 +143,13 @@ export function serializeCookie(
  */
 const encodeName = (str: string) =>
 	str
-		.replace(
-			/[^\x21\x23\x24\x26\x27\x2A\x2B\x2D\x2E\x30-\x39\x41-\x5A\x5E-\x7A\x7C\x7E]+/g,
-			encodeURIComponent,
-		)
-		.replace(/[()]/g, (s) => `%${s.charCodeAt(0).toString(16).toUpperCase()}`);
+		.replace(/[^\x21\x23\x24\x26\x27\x2A\x2B\x2D\x2E\x30-\x39\x41-\x5A\x5E-\x7A\x7C\x7E]+/g, encodeURIComponent)
+		.replace(/[()]/g, s => `%${s.charCodeAt(0).toString(16).toUpperCase()}`)
 
 /**
  * Safely URI decodes cookie name.
  */
-const decodeName = (str: string) =>
-	str.replace(/(%[\dA-Fa-f]{2})+/g, decodeURIComponent);
+const decodeName = (str: string) => str.replace(/(%[\dA-Fa-f]{2})+/g, decodeURIComponent)
 
 /**
  * URI encodes all characters not compliant with RFC 6265 cookie-octet syntax (namely, non-US-ASCII,
@@ -167,16 +158,12 @@ const decodeName = (str: string) =>
  * Refer to {@link https://www.rfc-editor.org/rfc/rfc6265#section-4.1.1 RFC 6265 section 4.1.1.} for more details.
  */
 const encodeValue = (str: string) =>
-	str.replace(
-		/[^\x21\x23\x24\x26-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]+/g,
-		encodeURIComponent,
-	);
+	str.replace(/[^\x21\x23\x24\x26-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]+/g, encodeURIComponent)
 
 /**
  * Safely URI decodes cookie value.
  */
-const decodeValue = (str: string) =>
-	str.replace(/(%[\dA-Fa-f]{2})+/g, decodeURIComponent);
+const decodeValue = (str: string) => str.replace(/(%[\dA-Fa-f]{2})+/g, decodeURIComponent)
 
 export function getCookieDomain(
 	cfDomain: string,
@@ -184,10 +171,10 @@ export function getCookieDomain(
 	customCookieDomain?: string,
 ): string | undefined {
 	if (disableCookieDomain) {
-		return undefined;
+		return undefined
 	}
 	if (customCookieDomain) {
-		return customCookieDomain;
+		return customCookieDomain
 	}
-	return cfDomain;
+	return cfDomain
 }

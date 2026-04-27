@@ -3,8 +3,10 @@
 		"module": "commonjs",
 		"target": "esnext",
 		"declaration": true,
+		"rootDir": "./src",
 		"outDir": "./dist",
-		"strict": true
+		"strict": true,
+		"types": ["node"]
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules"]
