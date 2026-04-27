@@ -67,7 +67,7 @@ export interface AuthenticatorParams {
 	cookiePath?: string
 	cookieDomain?: string
 	cookieSettingsOverrides?: CookieSettingsOverrides
-	logoutConfiguration?: LogoutConfiguration
+	logoutConfiguration: LogoutConfiguration
 	parseAuthPath?: string
 	csrfProtection?: {
 		nonceSigningSecret: string
@@ -93,8 +93,8 @@ const NO_CACHE_VALUE = "no-cache, no-store, max-age=0, must-revalidate"
 const COGNITO_TOKEN_SCOPES = "phone email profile openid aws.cognito.signin.user.admin"
 
 export class Authenticator {
-	private readonly region: string
-	private readonly userPoolId: string
+	//private readonly region: string
+	//private readonly userPoolId: string
 	private readonly userPoolClientId: string
 	private readonly userPoolClientSecret: string | undefined
 	private readonly userPoolDomain: string
@@ -108,16 +108,17 @@ export class Authenticator {
 	private readonly csrfProtection?: {
 		nonceSigningSecret: string
 	}
-	private readonly logoutConfiguration?: LogoutConfiguration
-	private readonly parseAuthPath?: string
+	private readonly logoutConfiguration: LogoutConfiguration
+	private readonly logoutRedirectUri: string
+	private readonly parseAuthPath: string
 	private readonly cookieSettingsOverrides?: CookieSettingsOverrides
 	private readonly logger: Logger
 	private readonly jwtVerifier
 	private readonly tokenCache: Map<string, { payload: CognitoIdTokenPayload; expSec: number }>
 
 	constructor(params: AuthenticatorParams) {
-		this.region = params.region
-		this.userPoolId = params.userPoolId
+		//this.region = params.region
+		//this.userPoolId = params.userPoolId
 		this.userPoolClientId = params.userPoolClientId
 		this.userPoolClientSecret = params.userPoolClientSecret
 		this.userPoolDomain = params.userPoolDomain
@@ -141,11 +142,8 @@ export class Authenticator {
 		})
 		this.csrfProtection = params.csrfProtection
 		this.logoutConfiguration = params.logoutConfiguration
+		this.logoutRedirectUri = encodeURIComponent(params.logoutConfiguration.logoutRedirectUri)
 		this.parseAuthPath = (params.parseAuthPath ?? "").replace(/^\//, "")
-	}
-
-	private async hydrate(): Promise<void> {
-		await this.jwtVerifier.hydrate()
 	}
 
 	private async verifyIdToken(idToken: string) {
@@ -161,6 +159,16 @@ export class Authenticator {
 			expSec: payload.exp ?? nowSec,
 		})
 		return payload
+	}
+
+	private async verifyIdTokenOnLogout(idToken: string) {
+		const nowSec = Math.floor(Date.now() / 1000)
+		const cached = this.tokenCache.get(idToken)
+		this.tokenCache.delete(idToken)
+		if (cached && nowSec < cached.expSec) {
+			return cached.payload
+		}
+		return await this.jwtVerifier.verify(idToken)
 	}
 
 	private async postToTokenEndpoint<T>(data: Record<string, string>, logCtx: Record<string, unknown>): Promise<T> {
@@ -190,11 +198,11 @@ export class Authenticator {
 
 	/**
 	 * Exchange authorization code for tokens.
-	 * @param  {String} redirectURI Redirection URI.
+	 * @param  {String} redirectUri Redirection URI.
 	 * @param  {String} code        Authorization code.
 	 * @return {Promise} Authenticated user tokens.
 	 */
-	async fetchTokensFromCode(redirectURI: string, code: string): Promise<Tokens> {
+	async fetchTokensFromCode(redirectUri: string, code: string): Promise<Tokens> {
 		const resp = await this.postToTokenEndpoint<{
 			id_token: string
 			access_token: string
@@ -204,7 +212,7 @@ export class Authenticator {
 				client_id: this.userPoolClientId,
 				code: code,
 				grant_type: "authorization_code",
-				redirect_uri: redirectURI,
+				redirect_uri: redirectUri,
 			},
 			{ msg: "Fetching tokens from grant code...", code },
 		)
@@ -217,11 +225,11 @@ export class Authenticator {
 
 	/**
 	 * Fetch accessTokens from refreshToken.
-	 * @param  {String} redirectURI Redirection URI.
+	 * @param  {String} redirectUri Redirection URI.
 	 * @param  {String} refreshToken Refresh token.
 	 * @return {Promise<Tokens>} Refreshed user tokens.
 	 */
-	async fetchTokensFromRefreshToken(redirectURI: string, refreshToken: string): Promise<Tokens> {
+	async fetchTokensFromRefreshToken(redirectUri: string, refreshToken: string): Promise<Tokens> {
 		const resp = await this.postToTokenEndpoint<{
 			id_token: string
 			access_token: string
@@ -230,7 +238,7 @@ export class Authenticator {
 				client_id: this.userPoolClientId,
 				refresh_token: refreshToken,
 				grant_type: "refresh_token",
-				redirect_uri: redirectURI,
+				redirect_uri: redirectUri,
 			},
 			{ msg: "Fetching tokens from refreshToken...", refreshToken },
 		)
@@ -251,7 +259,7 @@ export class Authenticator {
 		return request.headers.host[0].value
 	}
 
-	private getRedirectURI(cfDomain: string, requestParams: ReturnType<typeof parse>): string {
+	private getRedirectUri(cfDomain: string, requestParams: ReturnType<typeof parse>): string {
 		return (requestParams.redirect_uri as string) || `https://${cfDomain}`
 	}
 
@@ -266,7 +274,7 @@ export class Authenticator {
 		}
 	}
 
-	private getParseAuthOrFallbackURI(cfDomain: string, fallback: string): string {
+	private getParseAuthOrFallbackUri(cfDomain: string, fallback: string): string {
 		return this.parseAuthPath ? `https://${cfDomain}/${this.parseAuthPath}` : fallback
 	}
 
@@ -409,9 +417,7 @@ export class Authenticator {
 
 		const locationUrl = "https://" + domain + (path.startsWith("/") ? "" : "/") + path
 		const response = this.buildRedirectResponse(locationUrl, cookies)
-
 		this.logger.debug({ msg: "Generated set-cookie response", response })
-
 		return response
 	}
 
@@ -548,14 +554,12 @@ export class Authenticator {
 		}
 	}
 
-	async clearCookies(event: CloudFrontRequestEvent, tokens: Tokens = {}): Promise<CloudFrontResultResponse> {
-		this.logger.info({ msg: "Clearing cookies...", event, tokens })
-		this.tokenCache.clear()
-		const { request } = event.Records[0].cf
-		const cfDomain = this.getCFDomain(request)
+	async clearCookies(request: CloudFrontRequest, cfDomain:string, tokens: Tokens = {}): Promise<CloudFrontResultResponse> {
+		this.logger.info({ msg: "Clearing cookies...", request, tokens })
+		//const { request } = event.Records[0].cf
+		//const cfDomain = this.getCFDomain(request)
 		const requestParams = parse(request.querystring)
-		const redirectURI =
-			(this.logoutConfiguration?.logoutRedirectUri ?? (requestParams.redirect_uri as string)) || `https://${cfDomain}`
+		const redirectUri =  this.getRedirectUri(cfDomain, requestParams)
 
 		const cookieDomain = getCookieDomain(cfDomain, this.disableCookieDomain, this.cookieDomain)
 		const cookieAttributes = this.buildBaseCookieAttributes(cookieDomain, new Date())
@@ -563,7 +567,7 @@ export class Authenticator {
 		let responseCookies: string[] = []
 		try {
 			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			const decoded = await this.verifyIdToken(tokens.idToken!)
+			const decoded = await this.verifyIdTokenOnLogout(tokens.idToken!)
 			const username = decoded["cognito:username"]
 			this.logger.info({
 				msg: "Token verified. Clearing cookies...",
@@ -591,21 +595,7 @@ export class Authenticator {
 				}
 			}
 		}
-
-		//const _logoutUrl = `https://admin-auth.lunapinc.com/logout?redirect_uri=https%3A%2F%2Fapi.lunapinc.com%2Fcallback&response_type=code&client_id=2fanhdnhc54n45o4eclv43ne5c`
-
-		// Call logout endpoint server-side (fire and forget)
-		const params = new URLSearchParams({
-			client_id: this.userPoolClientId,
-			redirect_url: encodeURIComponent(redirectURI),
-			response_type: "code",
-		})
-		fetch(`https://${this.userPoolDomain}/logout?${params}`).catch(() => {
-			// Logout call failed, but we still redirect the user
-			this.logger.warn("Logout call failed, but redirecting user anyway")
-		})
-
-		const response = this.buildRedirectResponse(redirectURI, responseCookies)
+		const response = this.buildRedirectResponse(redirectUri, responseCookies)
 		this.logger.debug({ msg: "Generated set-cookie response", response })
 		return response
 	}
@@ -613,10 +603,10 @@ export class Authenticator {
 	/**
 	 * Get redirect to cognito userpool response
 	 * @param  {CloudFrontRequest}  request The original request
-	 * @param  {string}  redirectURI Redirection URI.
+	 * @param  {string}  redirectUri Redirection URI.
 	 * @return {CloudFrontResultResponse} Redirect response.
 	 */
-	getRedirectToCognitoUserPoolResponse(request: CloudFrontRequest, redirectURI: string): CloudFrontResultResponse {
+	getRedirectToCognitoUserPoolResponse(request: CloudFrontRequest, redirectUri: string): CloudFrontResultResponse {
 		let redirectPath = request.uri
 		if (request.querystring && request.querystring !== "") {
 			redirectPath += encodeURIComponent("?" + request.querystring)
@@ -625,12 +615,12 @@ export class Authenticator {
 		let csrfTokens: CSRFTokens = {}
 		let state: string | undefined = redirectPath
 		if (this.csrfProtection) {
-			csrfTokens = generateCSRFTokens(redirectURI, this.csrfProtection.nonceSigningSecret)
+			csrfTokens = generateCSRFTokens(redirectUri, this.csrfProtection.nonceSigningSecret)
 			state = csrfTokens.state
 		}
 
 		const params = new URLSearchParams({
-			redirect_uri: redirectURI,
+			redirect_uri: redirectUri,
 			response_type: "code",
 			client_id: this.userPoolClientId,
 		})
@@ -674,16 +664,28 @@ export class Authenticator {
 
 		const { request } = event.Records[0].cf
 		const cfDomain = this.getCFDomain(request)
-		const redirectURI = this.getParseAuthOrFallbackURI(cfDomain, `https://${cfDomain}`)
+		const redirectUri = this.getParseAuthOrFallbackUri(cfDomain, `https://${cfDomain}`)
 
 		try {
 			const tokens = this.getTokensFromCookie(request.headers.cookie)
-			if (this.logoutConfiguration && request.uri.startsWith(this.logoutConfiguration.logoutUri)) {
+			if (request.uri.startsWith(this.logoutConfiguration.logoutUri)) {
 				this.logger.info({ msg: "Revoking tokens", tokens })
 				await this.revokeTokens(tokens)
 
+				// Call logout endpoint server-side (fire and forget)
+				this.logger.info({ msg: "Calling logout endpoint server-side" })
+				const params = new URLSearchParams({
+					client_id: this.userPoolClientId,
+					redirect_url: this.logoutRedirectUri,
+					response_type: "code",
+				})
+				fetch(`https://${this.userPoolDomain}/logout?${params}`).catch(() => {
+					// Logout call failed, but we still redirect the user
+					this.logger.warn("Logout call failed, but redirecting user anyway")
+				})
+
 				this.logger.info({ msg: "Revoked tokens. Clearing cookies", tokens })
-				return await this.clearCookies(event, tokens)
+				return await this.clearCookies(request, cfDomain, tokens)
 			}
 			try {
 				this.logger.debug({ msg: "Verifying token...", tokens })
@@ -707,7 +709,7 @@ export class Authenticator {
 						tokens,
 						err,
 					})
-					return await this.fetchTokensFromRefreshToken(redirectURI, tokens.refreshToken).then(tokens =>
+					return await this.fetchTokensFromRefreshToken(redirectUri, tokens.refreshToken).then(tokens =>
 						this.getRedirectResponse(tokens, cfDomain, request.uri),
 					)
 				} else {
@@ -715,19 +717,19 @@ export class Authenticator {
 				}
 			}
 		} catch (err) {
-			if (this.logoutConfiguration && request.uri.startsWith(this.logoutConfiguration.logoutUri)) {
+			if (request.uri.startsWith(this.logoutConfiguration.logoutUri)) {
 				this.logger.info({ msg: "Clearing cookies", path: cfDomain })
-				return this.clearCookies(event)
+				return this.clearCookies(request, cfDomain)
 			}
 			this.logger.debug("User isn't authenticated: %s", err)
 
 			const requestParams = parse(request.querystring)
 			if (requestParams.code) {
-				return this.fetchTokensFromCode(redirectURI, requestParams.code as string).then(tokens =>
+				return this.fetchTokensFromCode(redirectUri, requestParams.code as string).then(tokens =>
 					this.getRedirectResponse(tokens, cfDomain, this.getRedirectUriFromState(requestParams.state as string)),
 				)
 			} else {
-				return this.getRedirectToCognitoUserPoolResponse(request, redirectURI)
+				return this.getRedirectToCognitoUserPoolResponse(request, redirectUri)
 			}
 		}
 	}
@@ -745,7 +747,7 @@ export class Authenticator {
 		const { request } = event.Records[0].cf
 
 		try {
-			const {idToken} = this.getTokensFromCookie(request.headers.cookie)
+			const { idToken } = this.getTokensFromCookie(request.headers.cookie)
 			if (!idToken) {
 				return false
 			}
@@ -771,7 +773,7 @@ export class Authenticator {
 		const { request } = event.Records[0].cf
 		const requestParams = parse(request.querystring)
 		const cfDomain = this.getCFDomain(request)
-		const redirectURI = this.getRedirectURI(cfDomain, requestParams)
+		const redirectUri = this.getRedirectUri(cfDomain, requestParams)
 
 		try {
 			const tokens = this.getTokensFromCookie(request.headers.cookie)
@@ -782,7 +784,7 @@ export class Authenticator {
 
 			this.logger.info({
 				msg: "Redirecting user to",
-				path: redirectURI,
+				path: redirectUri,
 				user,
 			})
 			return {
@@ -791,14 +793,14 @@ export class Authenticator {
 					location: [
 						{
 							key: "Location",
-							value: redirectURI,
+							value: redirectUri,
 						},
 					],
 				},
 			}
 		} catch (err) {
 			this.logger.debug("User isn't authenticated: %s", err)
-			return this.getRedirectToCognitoUserPoolResponse(request, this.getParseAuthOrFallbackURI(cfDomain, redirectURI))
+			return this.getRedirectToCognitoUserPoolResponse(request, this.getParseAuthOrFallbackUri(cfDomain, redirectUri))
 		}
 	}
 
@@ -824,12 +826,12 @@ export class Authenticator {
 			if (!this.parseAuthPath) {
 				throw new Error("parseAuthPath is not set")
 			}
-			const redirectURI = `https://${cfDomain}/${this.parseAuthPath}`
+			const redirectUri = `https://${cfDomain}/${this.parseAuthPath}`
 			if (requestParams.code) {
 				if (this.csrfProtection) {
 					this.validateCSRFCookies(request)
 				}
-				const tokens = await this.fetchTokensFromCode(redirectURI, requestParams.code as string)
+				const tokens = await this.fetchTokensFromCode(redirectUri, requestParams.code as string)
 				const location = this.getRedirectUriFromState(requestParams.state as string)
 
 				return await this.getRedirectResponse(tokens, cfDomain, location)
@@ -861,7 +863,7 @@ export class Authenticator {
 		const { request } = event.Records[0].cf
 		const cfDomain = this.getCFDomain(request)
 		const requestParams = parse(request.querystring)
-		const redirectURI = this.getRedirectURI(cfDomain, requestParams)
+		const redirectUri = this.getRedirectUri(cfDomain, requestParams)
 
 		try {
 			let tokens = this.getTokensFromCookie(request.headers.cookie)
@@ -872,16 +874,16 @@ export class Authenticator {
 
 			this.logger.debug({ msg: "Refreshing tokens...", tokens, user })
 			tokens = await this.fetchTokensFromRefreshToken(
-				redirectURI,
+				redirectUri,
 				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 				tokens.refreshToken!,
 			)
 
 			this.logger.debug({ msg: "Refreshed tokens...", tokens, user })
-			return await this.getRedirectResponse(tokens, cfDomain, redirectURI)
+			return await this.getRedirectResponse(tokens, cfDomain, redirectUri)
 		} catch (err) {
 			this.logger.debug("User isn't authenticated: %s", err)
-			return this.getRedirectToCognitoUserPoolResponse(request, this.getParseAuthOrFallbackURI(cfDomain, redirectURI))
+			return this.getRedirectToCognitoUserPoolResponse(request, this.getParseAuthOrFallbackUri(cfDomain, redirectUri))
 		}
 	}
 
@@ -901,7 +903,7 @@ export class Authenticator {
 		const { request } = event.Records[0].cf
 		const requestParams = parse(request.querystring)
 		const cfDomain = this.getCFDomain(request)
-		const redirectURI = this.getRedirectURI(cfDomain, requestParams)
+		const redirectUri = this.getRedirectUri(cfDomain, requestParams)
 
 		try {
 			const tokens = this.getTokensFromCookie(request.headers.cookie)
@@ -910,13 +912,13 @@ export class Authenticator {
 			await this.revokeTokens(tokens)
 
 			this.logger.info({ msg: "Revoked tokens. Clearing cookies...", tokens })
-			return await this.clearCookies(event, tokens)
+			return await this.clearCookies(request, cfDomain, tokens)
 		} catch (_err) {
 			this.logger.info({
 				msg: "Unable to revoke tokens. Clearing cookies...",
-				path: redirectURI,
+				path: redirectUri,
 			})
-			return this.clearCookies(event)
+			return this.clearCookies(request, cfDomain)
 		}
 	}
 }
