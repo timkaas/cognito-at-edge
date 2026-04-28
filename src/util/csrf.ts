@@ -58,7 +58,7 @@ export function generateSecret(allowedCharacters: string, secretLength: number) 
 
 export function sign(stringToSign: string, secret: string, signatureLength: number): string {
 	const digest = createHmac("sha256", secret).update(stringToSign).digest("base64").slice(0, signatureLength)
-	return  urlSafe.stringify(digest)
+	return urlSafe.stringify(digest)
 }
 
 export function signNonce(nonce: string, signingSecret: string): string {

@@ -37,7 +37,7 @@ const authenticator = new Authenticator({
 	// Replace these parameter values with those of your own environment
 	region: 'us-east-1', // user pool region
 	userPoolId: 'us-east-1_tyo1a1FHH', // user pool ID
-	userPoolAppId: '63gcbm2jmskokurt5ku9fhejc6', // user pool app client ID
+	userPoolClientId: '63gcbm2jmskokurt5ku9fhejc6', // user pool app client ID
 	userPoolDomain: 'domain.auth.us-east-1.amazoncognito.com', // user pool domain
 });
 
@@ -53,8 +53,8 @@ For an explanation of the interactions between CloudFront, Cognito and Lambda@Ed
 - `params` _Object_ Authenticator parameters:
   - `region` _string_ Cognito UserPool region (eg: `us-east-1`)
   - `userPoolId` _string_ Cognito UserPool ID (eg: `us-east-1_tyo1a1FHH`)
-  - `userPoolAppId` _string_ Cognito UserPool Application ID (eg: `63gcbm2jmskokurt5ku9fhejc6`)
-  - `userPoolAppSecret` _string_ (Optional) Cognito UserPool Application Secret (eg: `oh470px2i0uvy4i2ha6sju0vxe4ata9ol3m63ufhs2t8yytwjn7p`)
+  - `userPoolClientId` _string_ Cognito UserPool Client ID (eg: `63gcbm2jmskokurt5ku9fhejc6`)
+  - `userPoolClientSecret` _string_ (Optional) Cognito UserPool Client Secret (eg: `oh470px2i0uvy4i2ha6sju0vxe4ata9ol3m63ufhs2t8yytwjn7p`)
   - `userPoolDomain` _string_ Cognito UserPool domain (eg: `your-domain.auth.us-east-1.amazoncognito.com`)
   - `cookieExpirationDays` _number_ (Optional) Number of day to set cookies expiration date, default to 365 days (eg: `365`). It's recommended to set this value to match `refreshTokenValidity` parameter of the pool client.
   - `disableCookieDomain` _boolean_ (Optional) Sets domain attribute in cookies, defaults to false (eg: `false`)

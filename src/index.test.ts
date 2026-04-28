@@ -1,56 +1,70 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-import type { CognitoJwtVerifierMultiUserPool, CognitoJwtVerifierSingleUserPool } from "aws-jwt-verify/cognito-verifier"
+import { CognitoJwtVerifierMultiUserPool, CognitoJwtVerifierSingleUserPool } from "aws-jwt-verify/cognito-verifier"
 import { CloudFrontRequest, CloudFrontRequestEvent, CloudFrontResultResponse } from "aws-lambda"
 import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest"
 import { Authenticator, AuthenticatorParams } from "./index"
-import { SameSite, serializeCookie } from "./util/cookie"
+import { serializeCookie } from "./util/cookie"
+import * as csrfModule from "./util/csrf"
 import { NONCE_COOKIE_NAME_SUFFIX, NONCE_HMAC_COOKIE_NAME_SUFFIX, PKCE_COOKIE_NAME_SUFFIX } from "./util/csrf"
 
 const TEST_DATE = new Date("2017-01-01T00:00:00.000Z")
-
 // Test helper class that exposes private methods for testing
-// @ts-ignore
-class TestAuthenticator extends Authenticator {
+// @ts-expect-error Making private functions public for testing
+class AnyAuthenticator extends Authenticator {
+	// @ts-expect-error Making private functions public for testing
 	public fetchTokensFromCode = super.fetchTokensFromCode.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public fetchTokensFromRefreshToken = super.fetchTokensFromRefreshToken.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public getRedirectResponse = super.getRedirectResponse.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public getTokensFromCookie = super.getTokensFromCookie.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public getCSRFTokensFromCookie = super.getCSRFTokensFromCookie.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public getRedirectUriFromState = super.getRedirectUriFromState.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public revokeTokens = super.revokeTokens.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public clearCookies = super.clearCookies.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public getRedirectToCognitoUserPoolResponse = super.getRedirectToCognitoUserPoolResponse.bind(this)
+	// @ts-expect-error Making private functions public for testing
 	public validateCSRFCookies = super.validateCSRFCookies.bind(this)
-	public getOverridenCookieAttributes = super.getOverridenCookieAttributes.bind(this)
+	// @ts-expect-error Making private functions public for testing
+	public getHost = super.getHost.bind(this)
 
 	// Properties are accessed directly from parent class
 	// TypeScript doesn't allow overriding properties with accessors, so we just declare the types
 
-	declare public _jwtVerifier: // eslint-disable-next-line @typescript-eslint/no-explicit-any
+	declare public jwtVerifier: // eslint-disable-next-line @typescript-eslint/no-explicit-any
 		| CognitoJwtVerifierSingleUserPool<any>
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		| CognitoJwtVerifierMultiUserPool<any>
-	declare public _cookieBase: string
-	declare public _csrfProtection: AuthenticatorParams["csrfProtection"]
-	declare public _logoutConfiguration: AuthenticatorParams["logoutConfiguration"]
-	declare public _parseAuthPath: string
+	declare public cookieBase: string
+	declare public csrfProtection: AuthenticatorParams["csrfProtection"]
+	declare public logoutConfiguration: AuthenticatorParams["logoutConfiguration"]
+	declare public parseAuthPath: string
+}
+
+const defaults: AuthenticatorParams = {
+	region: "us-east-1",
+	userPoolId: "us-east-1_abcdef123",
+	userPoolClientId: "123456789qwertyuiop987abcd",
+	userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
+	cookieExpirationDays: 365,
+	disableCookieDomain: false,
+	httpOnly: false,
 }
 
 describe("private functions", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 
 	beforeEach(() => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
-			httpOnly: false,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 		})
 	})
 
@@ -85,7 +99,7 @@ describe("private functions", () => {
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticator._jwtVerifier, "verify")
+			.spyOn(authenticator.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const expectedDefaultExpiration = new Date(TEST_DATE)
@@ -138,15 +152,11 @@ describe("private functions", () => {
 	})
 
 	test("should not return cookie domain", async () => {
-		const authenticatorWithNoCookieDomain = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		const authenticatorWithNoCookieDomain = new AnyAuthenticator({
+			...defaults,
 			disableCookieDomain: true,
 		})
-		authenticatorWithNoCookieDomain._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithNoCookieDomain.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const expectedDefaultExpiration = new Date(TEST_DATE)
 		expectedDefaultExpiration.setDate(expectedDefaultExpiration.getDate() + 365)
@@ -154,7 +164,7 @@ describe("private functions", () => {
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithNoCookieDomain._jwtVerifier, "verify")
+			.spyOn(authenticatorWithNoCookieDomain.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithNoCookieDomain.getRedirectResponse(
@@ -205,16 +215,11 @@ describe("private functions", () => {
 	})
 
 	test("should set HttpOnly on cookies", async () => {
-		const authenticatorWithHttpOnly = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
+		const authenticatorWithHttpOnly = new AnyAuthenticator({
+			...defaults,
 			httpOnly: true,
 		})
-		authenticatorWithHttpOnly._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithHttpOnly.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const expectedDefaultExpiration = new Date(TEST_DATE)
 		expectedDefaultExpiration.setDate(expectedDefaultExpiration.getDate() + 365)
@@ -222,7 +227,7 @@ describe("private functions", () => {
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithHttpOnly._jwtVerifier, "verify")
+			.spyOn(authenticatorWithHttpOnly.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithHttpOnly.getRedirectResponse(
@@ -273,17 +278,12 @@ describe("private functions", () => {
 	})
 
 	test("should set SameSite on cookies", async () => {
-		const authenticatorWithSameSite = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
+		const authenticatorWithSameSite = new AnyAuthenticator({
+			...defaults,
 			httpOnly: true,
 			sameSite: "Strict",
 		})
-		authenticatorWithSameSite._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithSameSite.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const expectedDefaultExpiration = new Date(TEST_DATE)
 		expectedDefaultExpiration.setDate(expectedDefaultExpiration.getDate() + 365)
@@ -291,7 +291,7 @@ describe("private functions", () => {
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithSameSite._jwtVerifier, "verify")
+			.spyOn(authenticatorWithSameSite.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithSameSite.getRedirectResponse(
@@ -343,17 +343,12 @@ describe("private functions", () => {
 
 	test("should set Path on cookies", async () => {
 		const cookiePath = "/test/path"
-		const authenticatorWithPath = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
+		const authenticatorWithPath = new AnyAuthenticator({
+			...defaults,
 			cookiePath,
 		})
 
-		authenticatorWithPath._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithPath.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const expectedDefaultExpiration = new Date(TEST_DATE)
 		expectedDefaultExpiration.setDate(expectedDefaultExpiration.getDate() + 365)
@@ -361,7 +356,7 @@ describe("private functions", () => {
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithPath._jwtVerifier, "verify")
+			.spyOn(authenticatorWithPath.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithPath.getRedirectResponse(
@@ -413,13 +408,8 @@ describe("private functions", () => {
 
 	test("should set csrf tokens when the feature is enabled", async () => {
 		const cookiePath = "/test/path"
-		const authenticatorWithPath = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
+		const authenticatorWithPath = new AnyAuthenticator({
+			...defaults,
 			cookiePath,
 			csrfProtection: {
 				nonceSigningSecret: "foo-bar",
@@ -428,13 +418,13 @@ describe("private functions", () => {
 		const expectedDefaultExpiration = new Date(TEST_DATE)
 		expectedDefaultExpiration.setDate(expectedDefaultExpiration.getDate() + 365)
 
-		authenticatorWithPath._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithPath.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const username = "toto"
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithPath._jwtVerifier, "verify")
+			.spyOn(authenticatorWithPath.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithPath.getRedirectResponse(
@@ -498,13 +488,8 @@ describe("private functions", () => {
 
 	test("should use overriden cookie settings", async () => {
 		const cookiePath = "/test/path"
-		const authenticatorWithPath = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
-			disableCookieDomain: false,
+		const authenticatorWithPath = new AnyAuthenticator({
+			...defaults,
 			cookiePath,
 			httpOnly: true,
 			csrfProtection: {
@@ -519,13 +504,13 @@ describe("private functions", () => {
 				},
 			},
 		})
-		authenticatorWithPath._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticatorWithPath.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 
 		const username = "toto"
 		const domain = "example.com"
 		const path = "/test"
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithPath._jwtVerifier, "verify")
+			.spyOn(authenticatorWithPath.jwtVerifier, "verify")
 			.mockResolvedValueOnce(createMockCognitoPayload(username))
 
 		const response = await authenticatorWithPath.getRedirectResponse(
@@ -678,7 +663,7 @@ describe("private functions", () => {
 			for (const [name, value] of Object.entries(tokensInCookie)) {
 				cookieHeaders.push({
 					key: "cookie",
-					value: `${authenticator._cookieBase}.${name}=${String(value)}`,
+					value: `${authenticator.cookieBase}.${name}=${String(value)}`,
 				})
 			}
 			return {
@@ -693,7 +678,7 @@ describe("private functions", () => {
 		}
 
 		beforeEach(() => {
-			authenticator._csrfProtection = {
+			authenticator.csrfProtection = {
 				nonceSigningSecret: "foo-bar",
 			}
 		})
@@ -730,8 +715,8 @@ describe("private functions", () => {
 			}).toThrow("Your browser didn't send the pkce cookie along, but it is required for security (prevent CSRF).")
 		})
 
-		test("should throw error when calculated Hmac is different than the one stored in the cookie", async () => {
-			const csrfModule = await import("./util/csrf")
+		test("should throw error when calculated Hmac is different than the one stored in the cookie", () => {
+			//const csrfModule = await import("./util/csrf")
 			vi.spyOn(csrfModule, "signNonce").mockReturnValue("nonce-hmac-value-different")
 
 			const request = buildRequest(
@@ -767,14 +752,17 @@ describe("private functions", () => {
 
 	describe("_clearCookies", () => {
 		test("should verify tokens and clear cookies", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
+			vi.spyOn(authenticator.jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
-			authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+			authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 			const tokens = {
 				idToken: tokenData.id_token,
 				refreshToken: tokenData.refresh_token,
 			}
-			const response = await authenticator.clearCookies(getCloudfrontRequest(), tokens)
+
+			const event = getCloudfrontRequest()
+			const { request } = event.Records[0].cf
+			const response = await authenticator.clearCookies(request, "", tokens)
 			expect(response).toStrictEqual(
 				expect.objectContaining({
 					status: "302",
@@ -784,16 +772,17 @@ describe("private functions", () => {
 		})
 
 		test("should clear cookies even if tokens cannot be verified", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify").mockRejectedValueOnce(new Error())
+			vi.spyOn(authenticator.jwtVerifier, "verify").mockRejectedValueOnce(new Error())
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
-			authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+			authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 			const tokens = {
 				idToken: tokenData.id_token,
 				refreshToken: tokenData.refresh_token,
 			}
-			const request = getCloudfrontRequest()
-			const numCookiesToBeCleared = request.Records[0].cf.request.headers.cookie.length || 0
-			const response = await authenticator.clearCookies(request, tokens)
+			const event = getCloudfrontRequest()
+			const { request } = event.Records[0].cf
+			const numCookiesToBeCleared = request.headers.cookie.length || 0
+			const response = await authenticator.clearCookies(request, "", tokens)
 			expect(response).toStrictEqual(
 				expect.objectContaining({
 					status: "302",
@@ -803,53 +792,60 @@ describe("private functions", () => {
 		})
 
 		test("should clear cookies and redirect to logoutRedirectUri", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
+			vi.spyOn(authenticator.jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
-			authenticator._logoutConfiguration = {
-				logoutUri: "/logout",
+			authenticator.logoutConfiguration = {
+				logoutUriPath: "/logout",
 				logoutRedirectUri: "https://foobar.com",
 			}
-			authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+			authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 			const tokens = {
 				idToken: tokenData.id_token,
 				refreshToken: tokenData.refresh_token,
 			}
-			const response = await authenticator.clearCookies(getCloudfrontRequest(), tokens)
+			const event = getCloudfrontRequest()
+			const { request } = event.Records[0].cf
+			const cfDomain = authenticator.getHost(request)
+			const response = await authenticator.clearCookies(request, cfDomain, tokens)
 			expect(response).toStrictEqual(expect.objectContaining({ status: "302" }))
-			expect(response.headers?.location[0]?.value).toStrictEqual("https://foobar.com")
+			expect(response.headers?.location[0]?.value).toStrictEqual(
+				"https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Ffoobar.com",
+			)
 		})
 
 		test("should clear cookies and redirect to redirect_uri query param", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
+			vi.spyOn(authenticator.jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
-			authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
-			const request = getCloudfrontRequest()
-			request.Records[0].cf.request.querystring = "redirect_uri=https://foobar.com"
-			const response = await authenticator.clearCookies(request)
+			authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+			const event = getCloudfrontRequest()
+			const { request } = event.Records[0].cf
+			request.querystring = "redirect_uri=https://foobar2.com"
+			const response = await authenticator.clearCookies(request, "")
 			expect(response).toStrictEqual(expect.objectContaining({ status: "302" }))
-			expect(response.headers?.location[0]?.value).toStrictEqual("https://foobar.com")
+			expect(response.headers?.location[0]?.value).toStrictEqual(
+				"https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&redirect_uri=https%3A%2F%2Ffoobar2.com&response_type=code",
+			)
 		})
 
 		test("should clear cookies and redirect to cf domain", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
+			vi.spyOn(authenticator.jwtVerifier, "verify").mockResolvedValueOnce(createMockCognitoPayload())
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
-			authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
-			const request = getCloudfrontRequest()
-			const response = await authenticator.clearCookies(request)
+			authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+			const event = getCloudfrontRequest()
+			const { request } = event.Records[0].cf
+			const cfDomain = authenticator.getHost(request)
+			const response = await authenticator.clearCookies(request, cfDomain)
 			expect(response).toStrictEqual(expect.objectContaining({ status: "302" }))
-			expect(response.headers?.location[0]?.value).toStrictEqual("https://d111111abcdef8.cloudfront.net")
+			expect(response.headers?.location[0]?.value).toStrictEqual(
+				"https://my-cognito-domain.auth.us-east-1.amazoncognito.com/logout?client_id=123456789qwertyuiop987abcd&logout_uri=https%3A%2F%2Fd111111abcdef8.cloudfront.net",
+			)
 		})
 	})
 })
 
 describe("createAuthenticator", () => {
 	const params: AuthenticatorParams = {
-		region: "us-east-1",
-		userPoolId: "us-east-1_abcdef123",
-		userPoolClientId: "123456789qwertyuiop987abcd",
-		userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-		cookieDomain: "test.example.com",
-		cookieExpirationDays: 365,
+		...defaults,
 		disableCookieDomain: true,
 		httpOnly: false,
 	}
@@ -887,132 +883,10 @@ describe("createAuthenticator", () => {
 		const { cookiePath, ...rest } = params
 		expect(typeof new Authenticator(rest)).toBe("object")
 	})
-
-	test("should fail when creating authenticator with unvalidated samesite", () => {
-		expect(() => new Authenticator({ ...params, sameSite: 123 as unknown as SameSite })).toThrow("Expected params")
-	})
-
-	test("should fail when creating authenticator without params", () => {
-		// @ts-ignore
-		// ts-ignore is used here to override typescript's type check in the constructor
-		// this test is still useful when the library is imported to a js file
-		expect(() => new Authenticator()).toThrow("Expected params")
-	})
-
-	test("should fail when creating authenticator without region", () => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		const { region, ...rest } = params
-		expect(() => new Authenticator(rest as AuthenticatorParams)).toThrow("region")
-	})
-
-	test("should fail when creating authenticator without userPoolId", () => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		const { userPoolId, ...rest } = params
-		expect(() => new Authenticator(rest as AuthenticatorParams)).toThrow("userPoolId")
-	})
-
-	test("should fail when creating authenticator without userPoolAppId", () => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		const { userPoolClientId, ...rest } = params
-		expect(() => new Authenticator(rest as AuthenticatorParams)).toThrow("userPoolAppId")
-	})
-
-	test("should fail when creating authenticator without userPoolDomain", () => {
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
-		const { userPoolDomain, ...rest } = params
-		expect(() => new Authenticator(rest as AuthenticatorParams)).toThrow("userPoolDomain")
-	})
-
-	test("should fail when creating authenticator with invalid region", () => {
-		expect(() => new Authenticator({ ...params, region: 123 as unknown as string })).toThrow("region")
-	})
-
-	test("should fail when creating authenticator with invalid userPoolId", () => {
-		expect(() => new Authenticator({ ...params, userPoolId: 123 as unknown as string })).toThrow("userPoolId")
-	})
-
-	test("should fail when creating authenticator with invalid userPoolAppId", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					userPoolClientId: 123 as unknown as string,
-				}),
-		).toThrow("userPoolAppId")
-	})
-
-	test("should fail when creating authenticator with invalid userPoolDomain", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					userPoolDomain: 123 as unknown as string,
-				}),
-		).toThrow("userPoolDomain")
-	})
-
-	test("should fail when creating authenticator with invalid cookieExpirationDays", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					cookieExpirationDays: "123" as unknown as number,
-				}),
-		).toThrow("cookieExpirationDays")
-	})
-
-	test("should fail when creating authenticator with invalid disableCookieDomain", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					disableCookieDomain: 123 as unknown as boolean,
-				}),
-		).toThrow("disableCookieDomain")
-	})
-
-	test("should fail when creating authenticator with invalid cookie domain", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					cookieDomain: 123 as unknown as string,
-				}),
-		).toThrow("cookieDomain")
-	})
-
-	test("should fail when creating authenticator with invalid httpOnly", () => {
-		expect(() => new Authenticator({ ...params, httpOnly: 123 as unknown as boolean })).toThrow("httpOnly")
-	})
-
-	test("should fail when creating authenticator with invalid cookiePath", () => {
-		expect(() => new Authenticator({ ...params, cookiePath: 123 as unknown as string })).toThrow("cookiePath")
-	})
-
-	test("should fail when creating authenticator with invalid logoutUri", () => {
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					logoutConfiguration: {
-						logoutUri: "",
-					} as AuthenticatorParams["logoutConfiguration"],
-				}),
-		).toThrow("logoutUri")
-		expect(
-			() =>
-				new Authenticator({
-					...params,
-					logoutConfiguration: {
-						logoutUri: "/",
-					} as AuthenticatorParams["logoutConfiguration"],
-				}),
-		).toThrow("logoutUri")
-	})
 })
 
 describe("handle", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 	let spyJwtVerify: MockInstance
 	let spyGetTokensFromCookie: MockInstance
 	let spyGetTokensFromCode: MockInstance
@@ -1026,14 +900,10 @@ describe("handle", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 		})
-		authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 		spyGetTokensFromCookie = vi.spyOn(authenticator, "getTokensFromCookie")
 		spyGetTokensFromCode = vi.spyOn(authenticator, "fetchTokensFromCode")
 		spyFetchTokensFromRefreshToken = vi.spyOn(authenticator, "fetchTokensFromRefreshToken")
@@ -1041,7 +911,7 @@ describe("handle", () => {
 		spyGetRedirectToCognitoUserPoolResponse = vi.spyOn(authenticator, "getRedirectToCognitoUserPoolResponse")
 		spyRevokeTokens = vi.spyOn(authenticator, "revokeTokens")
 		spyClearCookies = vi.spyOn(authenticator, "clearCookies")
-		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, "verify")
+		spyJwtVerify = vi.spyOn(authenticator.jwtVerifier, "verify")
 	})
 
 	afterEach(() => {
@@ -1126,15 +996,12 @@ describe("handle", () => {
 	})
 
 	test("should fetch and set token if code is present (custom redirect)", async () => {
-		const authenticatorWithCustomRedirect = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
+		const authenticatorWithCustomRedirect = new AnyAuthenticator({
+			...defaults,
 			parseAuthPath: "/custom/login/path",
 		})
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithCustomRedirect._jwtVerifier, "verify")
+			.spyOn(authenticatorWithCustomRedirect.jwtVerifier, "verify")
 			.mockRejectedValueOnce(new Error())
 		const spyFetchTokensFromCode = vi
 			.spyOn(authenticatorWithCustomRedirect, "fetchTokensFromCode")
@@ -1165,7 +1032,7 @@ describe("handle", () => {
 		spyGetRedirectResponse.mockReturnValueOnce({
 			response: "toto",
 		})
-		authenticator._csrfProtection = {
+		authenticator.csrfProtection = {
 			nonceSigningSecret: "foobar",
 		}
 		const encodedState = Buffer.from(JSON.stringify({ redirect_uri: "/lol" })).toString("base64")
@@ -1213,15 +1080,12 @@ describe("handle", () => {
 	})
 
 	test("should redirect to auth domain if unauthenticated and no code (custom redirect)", async () => {
-		const authenticatorWithCustomRedirect = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
+		const authenticatorWithCustomRedirect = new AnyAuthenticator({
+			...defaults,
 			parseAuthPath: "/custom/login/path",
 		})
 		const spyJwtVerify = vi
-			.spyOn(authenticatorWithCustomRedirect._jwtVerifier, "verify")
+			.spyOn(authenticatorWithCustomRedirect.jwtVerifier, "verify")
 			.mockRejectedValueOnce(new Error())
 
 		const result = await authenticatorWithCustomRedirect.handle(getCloudfrontRequest())
@@ -1256,7 +1120,7 @@ describe("handle", () => {
 	test("should redirect to auth domain and clear csrf cookies if unauthenticated and no code", async () => {
 		spyJwtVerify.mockRejectedValueOnce(new Error())
 
-		authenticator._csrfProtection = {
+		authenticator.csrfProtection = {
 			nonceSigningSecret: "foo-bar",
 		}
 		const response = await authenticator.handle(getCloudfrontRequest())
@@ -1298,14 +1162,11 @@ describe("handle", () => {
 	})
 
 	test("should redirect to auth domain with custom return redirect if unauthenticated", async () => {
-		const authenticatorWithCustomRedirect = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
+		const authenticatorWithCustomRedirect = new AnyAuthenticator({
+			...defaults,
 			parseAuthPath: "/custom/login/path",
 		})
-		vi.spyOn(authenticatorWithCustomRedirect._jwtVerifier, "verify").mockRejectedValueOnce(new Error())
+		vi.spyOn(authenticatorWithCustomRedirect.jwtVerifier, "verify").mockRejectedValueOnce(new Error())
 		const response = await authenticatorWithCustomRedirect.handle(getCloudfrontRequest())
 
 		expect(response.headers?.location).toBeDefined()
@@ -1317,8 +1178,8 @@ describe("handle", () => {
 	})
 
 	test("should revoke tokens and clear cookies if logoutConfiguration is set", async () => {
-		authenticator._logoutConfiguration = {
-			logoutUri: "/logout",
+		authenticator.logoutConfiguration = {
+			logoutUriPath: "/logout",
 			logoutRedirectUri: "https://example.com",
 		}
 		spyGetTokensFromCookie.mockReturnValueOnce({
@@ -1338,8 +1199,8 @@ describe("handle", () => {
 	})
 
 	test("should clear cookies if logoutConfiguration is set even if user is unauthenticated", async () => {
-		authenticator._logoutConfiguration = {
-			logoutUri: "/logout",
+		authenticator.logoutConfiguration = {
+			logoutUriPath: "/logout",
 			logoutRedirectUri: "https://example.com",
 		}
 		spyGetTokensFromCookie.mockImplementationOnce(() => {
@@ -1378,7 +1239,7 @@ describe("handle", () => {
 		})
 
 		test("should handle case where relative path is missing / prefix)", async () => {
-			vi.spyOn(authenticator._jwtVerifier, "verify")
+			vi.spyOn(authenticator.jwtVerifier, "verify")
 			spyJwtVerify.mockResolvedValueOnce(createMockCognitoPayload("toto"))
 
 			const response = await authenticator.getRedirectResponse(
@@ -1435,7 +1296,7 @@ describe("handle", () => {
 })
 
 describe("handleSignIn", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 	let spyGetTokensFromCookie: MockInstance
 	let spyRedirectToCognito: MockInstance
 	let spyJwtVerify: MockInstance
@@ -1444,18 +1305,14 @@ describe("handleSignIn", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 			parseAuthPath: "parseAuth",
 		})
-		authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 		spyGetTokensFromCookie = vi.spyOn(authenticator, "getTokensFromCookie")
 		spyRedirectToCognito = vi.spyOn(authenticator, "getRedirectToCognitoUserPoolResponse")
-		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, "verify")
+		spyJwtVerify = vi.spyOn(authenticator.jwtVerifier, "verify")
 	})
 
 	afterEach(() => {
@@ -1503,7 +1360,7 @@ describe("handleSignIn", () => {
 })
 
 describe("handleParseAuth", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 	let spyValidateCSRFCookies: MockInstance
 	let spyGetTokensFromCode: MockInstance
 	let spyGetRedirectResponse: MockInstance
@@ -1512,15 +1369,11 @@ describe("handleParseAuth", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 			parseAuthPath: "parseAuth",
 		})
-		authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 		spyValidateCSRFCookies = vi.spyOn(authenticator, "validateCSRFCookies")
 		spyGetTokensFromCode = vi.spyOn(authenticator, "fetchTokensFromCode")
 		spyGetRedirectResponse = vi.spyOn(authenticator, "getRedirectResponse")
@@ -1560,7 +1413,7 @@ describe("handleParseAuth", () => {
 		})
 
 		test("should redirect successfully after validating CSRF tokens", async () => {
-			authenticator._csrfProtection = {
+			authenticator.csrfProtection = {
 				nonceSigningSecret: "foo-bar",
 			}
 			spyValidateCSRFCookies.mockImplementation(() => {
@@ -1594,7 +1447,7 @@ describe("handleParseAuth", () => {
 	})
 
 	test("should throw error when parseAuthPath is not set", async () => {
-		authenticator._parseAuthPath = ""
+		authenticator.parseAuthPath = ""
 		spyGetRedirectResponse.mockReturnValueOnce({
 			response: "toto",
 		})
@@ -1620,7 +1473,7 @@ describe("handleParseAuth", () => {
 })
 
 describe("handleRefreshToken", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 	let spyGetTokensFromCookie: MockInstance
 	let spyJwtVerify: MockInstance
 	let spyFetchTokensFromRefreshToken: MockInstance
@@ -1630,16 +1483,12 @@ describe("handleRefreshToken", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 		})
-		authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 		spyGetTokensFromCookie = vi.spyOn(authenticator, "getTokensFromCookie")
-		spyJwtVerify = vi.spyOn(authenticator._jwtVerifier, "verify")
+		spyJwtVerify = vi.spyOn(authenticator.jwtVerifier, "verify")
 		spyFetchTokensFromRefreshToken = vi.spyOn(authenticator, "fetchTokensFromRefreshToken")
 		spyGetRedirectResponse = vi.spyOn(authenticator, "getRedirectResponse")
 		vi.spyOn(authenticator, "getRedirectToCognitoUserPoolResponse")
@@ -1691,7 +1540,7 @@ describe("handleRefreshToken", () => {
 })
 
 describe("handleSignOut", () => {
-	let authenticator: TestAuthenticator
+	let authenticator: AnyAuthenticator
 	let spyGetTokensFromCookie: MockInstance
 	let spyRevokeTokens: MockInstance
 	let spyClearCookies: MockInstance
@@ -1700,14 +1549,10 @@ describe("handleSignOut", () => {
 		vi.useFakeTimers()
 		vi.setSystemTime(TEST_DATE)
 
-		authenticator = new TestAuthenticator({
-			region: "us-east-1",
-			userPoolId: "us-east-1_abcdef123",
-			userPoolClientId: "123456789qwertyuiop987abcd",
-			userPoolDomain: "my-cognito-domain.auth.us-east-1.amazoncognito.com",
-			cookieExpirationDays: 365,
+		authenticator = new AnyAuthenticator({
+			...defaults,
 		})
-		authenticator._jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
+		authenticator.jwtVerifier.cacheJwks(jwksData, "us-east-1_abcdef123")
 		spyGetTokensFromCookie = vi.spyOn(authenticator, "getTokensFromCookie")
 		spyRevokeTokens = vi.spyOn(authenticator, "revokeTokens")
 		spyClearCookies = vi.spyOn(authenticator, "clearCookies")

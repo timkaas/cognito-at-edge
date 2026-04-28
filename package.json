@@ -9,8 +9,14 @@
 	"description": "Cognito authentication made easy to protect your website with CloudFront and Lambda@Edge.",
 	"author": "AWS Builder Labs <aws-builder-labs@amazon.com>, LunaPinc <timkaas@lunapinc.com> and contributors",
 	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"/dist"
+	],
 	"scripts": {
-		"test": "vitest run --coverage",
+		"test": "vitest run --no-watch --no-coverage",
+		"test:coverage": "vitest run --coverage",
 		"format": "prettier --config .prettierrc.toml 'src/**/*.ts' --write --list-different",
 		"lint": "yarn format && eslint . --ext .ts",
 		"build": "yarn lint && tsc",
