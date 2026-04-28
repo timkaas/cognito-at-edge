@@ -576,17 +576,18 @@ export class Authenticator {
 		}
 
 		const requestParams = parse(request.querystring)
-		const redirectUri = requestParams.redirect_uri
+		const redirectUri = requestParams.redirect_uri as string | undefined
+		const logoutUri = requestParams.logout_uri as string | undefined
 
 		const params = redirectUri
 			? new URLSearchParams({
 					client_id: this.userPoolClientId,
-					redirect_uri: redirectUri as string,
+					redirect_uri: redirectUri,
 					response_type: "code",
 				})
 			: new URLSearchParams({
 					client_id: this.userPoolClientId,
-					logout_uri: this.logoutConfiguration?.logoutRedirectUri ?? `https://${cfDomain}`,
+					logout_uri: logoutUri ?? this.logoutConfiguration?.logoutRedirectUri ?? `https://${cfDomain}`,
 				})
 
 		const logoutUrl = `https://${this.userPoolDomain}/logout?${params}`
